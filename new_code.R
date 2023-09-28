@@ -6,12 +6,7 @@ library(rvest)
 library(openxlsx)
 library(lubridate)
 library(XLConnect)
-fyod <- year(today()) #assumes that you are running the script in the same year as the first year of data
-# continue <- readline("What is the first year of data?") #sanity check to make sure above assumption ok
-# assertthat::assert_that(identical(as.character(fyod), #throw error if not
-#                                  continue),
-#                        msg=paste("You need to manually set the fyod by replacing year(today()) with",
-#                                  as.numeric(continue)))
+fyod <- 2023 #first year of data
 fyfn <- fyod+5
 tyfn <- fyod+10
 #functions------------------
@@ -46,7 +41,7 @@ write_workbook <- function(data, sheetname, startrow, startcol) {
   )
 }
 
-make_wide <- function(dat){
+make_wide <- function(dat){#this function take a n by k dataframe, and makes it into a 1 by nk dataframe
   dat |>
     mutate(row = row_number()) |>
     tidyr::pivot_wider(names_from = row,
@@ -58,15 +53,15 @@ get_cagrs <- function(tbbl){
   now <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyod]
   fyfn <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyfn]
   tyfn <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==tyfn]
-  ffy_cagr <- round((fyfn/now)^.2-1,3)
-  sfy_cagr <- round((tyfn/fyfn)^.2-1,3)
+  ffy_cagr <- round((fyfn/now)^.2-1, 3)
+  sfy_cagr <- round((tyfn/fyfn)^.2-1, 3)
   tibble(ffy_cagr=ffy_cagr, sfy_cagr=sfy_cagr)
 }
 
 get_10_cagr <- function(tbbl){
   now <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyod]
   tyfn <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==tyfn]
-  cagr <- round((tyfn/now)^.1-1,3)
+  cagr <- round((tyfn/now)^.1-1, 3)
   cagr
 }
 
@@ -77,9 +72,9 @@ get_jos <- function(tbbl){
 }
 
 get_breakdown <- function(tbbl){
-  jo <- sum(tbbl$value[tbbl$Variable=="Job Openings"& tbbl$name %in% (fyod+1):tyfn])
-  rep <- sum(tbbl$value[tbbl$Variable=="Replacement Demand"& tbbl$name %in% (fyod+1):tyfn])
-  exp <- sum(tbbl$value[tbbl$Variable=="Expansion Demand"& tbbl$name %in% (fyod+1):tyfn])
+  jo <- sum(tbbl$value[tbbl$Variable=="Job Openings" & tbbl$name %in% (fyod+1):tyfn])
+  rep <- sum(tbbl$value[tbbl$Variable=="Replacement Demand" & tbbl$name %in% (fyod+1):tyfn])
+  exp <- sum(tbbl$value[tbbl$Variable=="Expansion Demand" & tbbl$name %in% (fyod+1):tyfn])
   exp_p = round(exp/jo, 3)
   exp_p = case_when(exp_p > 1 ~ 1,
                     exp_p < 0 ~ 0,
@@ -124,7 +119,7 @@ ftpt <- vroom(here("data",
                                        ))|>
   select(NOC_2021=NOC_5, `Part-time/full-time`)|>
   mutate(NOC_2021=paste0("#", NOC_2021))
-senior_managers <- tibble(NOC_2021="#00018", `Part-time/full-time`="Higher Chance of Full-Time")
+senior_managers <- tibble(NOC_2021="#00018", `Part-time/full-time`="Higher Chance of Full-Time") #based on components
 ftpt <- bind_rows(ftpt, senior_managers)
 #get teer descriptions from web------------------------------------
 teer_description <- read_html("https://noc.esdc.gc.ca/Training/TeerCategory")|>
@@ -135,11 +130,13 @@ teer_description <- teer_description|>
   select(-`TEER category`, TEER_description=starts_with("Nature"))
 #occupation characteristics--------------------------------------
 occ_char <- read_excel(here("data",
-                            list.files(here("data"), pattern = "Occupational Characteristics")),
+                            list.files(here("data"),
+                                       pattern = "Occupational Characteristics")),
                        skip=3)
 #industry characteristics---------------------------------------------------
 ind_char <- read_excel(here("data",
-                            list.files(here("data"), pattern = "industry")))|>
+                            list.files(here("data"),
+                                       pattern = "industry")))|>
   transmute(`Industry (sub-industry)`=lmo_detailed_industry,
          `Industry (aggregate)`=str_to_title(str_replace_all(aggregate_industry,"_"," ")))|>
   distinct()
@@ -147,7 +144,7 @@ ind_char <- read_excel(here("data",
 jo <- vroom(here("data", "job_openings.csv"), skip=3)|>
   janitor::remove_empty()|>
   filter(Variable=="Job Openings",
-         !`Geographic Area` %in% c("North","South East"))|>
+         !`Geographic Area` %in% c("North", "South East"))|>
   pivot_longer(cols=starts_with("2"))|>
   group_by(NOC, Description, Industry, `Geographic Area`)|>
   summarize(jo=sum(value))|>
@@ -477,7 +474,7 @@ jo|>
 #WorkBC_Career_Profile_Data.xlsx----------------------------------------------------
 #' 1. Suppression rule:
 #'   If the current year's employment is below 20,
-#'   then all variables should be changed to "N/A"
+#'   then all numeric variables should be changed to "N/A"
 #'
 
 wbccpd <- long|>
@@ -500,7 +497,7 @@ wbccpd <- long|>
 
 #' This is the "by NOC and geographic_area" breakdown of the labour market.
 #' 1. Suppression rule:
-#'   If the current year's employment is below 20, then all variables should be changed to "N/A"
+#'   If the current year's employment is below 20, then all numeric variables should be changed to "N/A"
 wbccpd_regional <- long |>
   filter(NOC != "#T")|>
   mutate(
@@ -509,7 +506,7 @@ wbccpd_regional <- long |>
     jos = map_dbl(data, get_10_jo)
     )|>
   select(-data)|>
-  mutate(across(contains("current_employment")|contains("jos"), ~ round(.x, -1)),
+  mutate(across(contains("current_employment") | contains("jos"), ~ round(.x, -1)),
     across(where(is.numeric), ~ if_else(current_employment < 20, NA_real_, .x)))|>
   arrange(`Geographic Area`) |>
   pivot_wider(
