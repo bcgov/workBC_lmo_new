@@ -329,6 +329,9 @@ hoo|>
   mutate(jo=round(jo,-1))|>
   select(`Occupation Title`=Description,
          "Job Openings {fyod}-{tyfn}":=jo,
+         "Wage Rate Low {fyod-1}":=`Wage Rate Low`,
+         "Wage Rate Median {fyod-1}":=`Wage Rate Median`,
+         "Wage Rate High {fyod-1}":=`Wage Rate High`,
          `Median Annual Salary`=contains("Employment Income"),
          `#NOC`=`#NOC (2021)`,
          Geography
@@ -350,6 +353,9 @@ hoo|>
   mutate(jo=round(jo,-1))|>
   select(`Occupation Title`=Description,
          "Job Openings {fyod}-{tyfn}":=jo,
+         "Wage Rate Low {fyod-1}":=`Wage Rate Low`,
+         "Wage Rate Median {fyod-1}":=`Wage Rate Median`,
+         "Wage Rate High {fyod-1}":=`Wage Rate High`,
          `Median Annual Salary`=contains("Employment Income"),
          NOC=`#NOC (2021)`
         )|>
