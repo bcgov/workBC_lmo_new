@@ -217,7 +217,7 @@ cdqjom <- occ_char |>
           NOC_2021_Description=Description,
           jo=contains("Job Openings") & ! contains("Ave"),
           TEER,
-          `Salary (calculated median salary)`=contains("Median")
+          `Salary (calculated median salary)`=contains("Median Employment Income")
           )|>
   mutate(jo=round(jo, -1),
          Link=paste0("https://www.workbc.ca/Jobs-Careers/Explore-Careers/Browse-Career-Profile/",
@@ -643,7 +643,8 @@ wbcrpd_s1 <-   long |>
          )|>
   unnest(cagrs)|>
   select(-data)|>
-  mutate(across(c(ffy, sfy, jo, rep, exp, contains("employment"), diff), ~round(.x, -1)))
+  mutate(across(c(ffy, sfy, jo, rep, exp, contains("employment"), diff), ~round(.x, -1)))|>
+  select(`Geographic Area`, ffy, sfy, jo, rep, rep_p, exp, exp_p, everything())
 
 wbcrpd_s2 <- long|>
   filter(NOC!="#T",
