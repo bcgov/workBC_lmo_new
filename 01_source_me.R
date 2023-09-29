@@ -131,8 +131,8 @@ teer_description <- teer_description|>
 #occupation characteristics--------------------------------------
 occ_char <- read_excel(here("data",
                             list.files(here("data"),
-                                       pattern = "Occupational Characteristics")),
-                       skip=3)
+                                       pattern = "Occupational Characteristics \\(with skills and interests\\)")),
+                       skip=0)
 #industry characteristics---------------------------------------------------
 ind_char <- read_excel(here("data",
                             list.files(here("data"),
@@ -333,6 +333,11 @@ hoo|>
          "Wage Rate Median {fyod-1}":=`Wage Rate Median`,
          "Wage Rate High {fyod-1}":=`Wage Rate High`,
          `Median Annual Salary`=contains("Employment Income"),
+         Interests,
+         `Skills and Competencies (Top 3 together)`=`Skills: Top 3`,
+         `First`=Skill1,
+         `Second`=Skill2,
+         `Third`=Skill3,
          `#NOC`=`#NOC (2021)`,
          Geography
          )|>
@@ -357,7 +362,9 @@ hoo|>
          "Wage Rate Median {fyod-1}":=`Wage Rate Median`,
          "Wage Rate High {fyod-1}":=`Wage Rate High`,
          `Median Annual Salary`=contains("Employment Income"),
-         NOC=`#NOC (2021)`
+         NOC=`#NOC (2021)`,
+         `Occupational Interest`=Interests,
+         `Skills and Compentencies (Top 3)`=`Skills: Top 3`
         )|>
   mutate(NOC=str_sub(NOC, 2,-1),
          TEER=str_sub(NOC,2,2))|>
