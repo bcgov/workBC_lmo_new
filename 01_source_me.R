@@ -95,6 +95,15 @@ get_10_jo <- function(tbbl){
 }
 
 #READ IN THE DATA------------------------
+
+#list of NOCs that have videos--------------------------------
+
+career_trek_have_videos <- read_excel(here("data","WorkBC_Career_Trek_2023-2033_CEU EDIT.xlsx"))|>
+  select(-contains("Updates"), -contains("employment"), -contains("openings"))|>
+  rename(NOC=`NOC 2021...2`)|>
+  select(-contains("..."))
+
+
 #full time part time---------------------
 ftpt <- vroom(here("data",
                    list.files(here("data"),
@@ -570,8 +579,15 @@ wbcct_emp <- emp|>
   select(-data)
 
 wbcct <- full_join(wbcct_emp, wbcct_jo)|>
-  mutate(sr_no=NA, .before=everything())|>
-  mutate(occupation=NA, .after=Description)
+  right_join(career_trek_have_videos)|>
+  select(`NOC 2016`,
+         NOC,
+         `Sr No`,
+         `NOC Title (2016)`,
+         Description,
+         starts_with("Occupation"),
+         cagr,
+         jo)
 
 wb <- loadWorkbook(here("new_templates", "WorkBC_Career_Trek.xlsx"))
 write_workbook(wbcct , "LMO", 2, 1)
