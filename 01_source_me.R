@@ -336,9 +336,9 @@ bind_rows(cstogmu_all,
 
 #HOO BC and Region for new tool.xlsx-----------------------------
 
-temp <- hoo|>
+occ_char|>
   select(-contains("Job Openings"))|>
-  left_join(occ_char, by=c("#NOC (2021)"="NOC"))|>
+  right_join(hoo, by=c("NOC"="#NOC (2021)"))|>
   rename(jo= contains("Job Openings") & !contains("Ave"))|>
   mutate(jo=round(jo,-1))|>
   select(`Occupation Title`=Description,
@@ -352,7 +352,7 @@ temp <- hoo|>
          `First`=Skill1,
          `Second`=Skill2,
          `Third`=Skill3,
-         `#NOC`=`#NOC (2021)`,
+         `#NOC`=NOC,
          Geography
          )|>
   mutate(NOC=str_sub(`#NOC`,2,-1), .before=`#NOC`)|>
@@ -393,6 +393,7 @@ career_profiles <- jo|>
   filter(`Geographic Area`=="British Columbia")|>
   mutate(Industry=str_to_lower(str_replace_all(Industry, " ","_")))|>
   full_join(ind_char, by=c("Industry"="Industry (sub-industry)"))|>
+  filter(!is.na(`Industry (aggregate)`))|>
   group_by(NOC_2021, NOC_2021_Description, `Industry (aggregate)`)|>
   summarize(job_openings = sum(jo))|>
   slice_max(job_openings, n=5, with_ties = FALSE)|>
