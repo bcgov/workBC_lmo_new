@@ -53,15 +53,15 @@ get_cagrs <- function(tbbl){
   now <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyod]
   fyfn <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyfn]
   tyfn <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==tyfn]
-  ffy_cagr <- round((fyfn/now)^.2-1, 3)
-  sfy_cagr <- round((tyfn/fyfn)^.2-1, 3)
+  ffy_cagr <- 100*round((fyfn/now)^.2-1, 3)
+  sfy_cagr <- 100*round((tyfn/fyfn)^.2-1, 3)
   tibble(ffy_cagr=ffy_cagr, sfy_cagr=sfy_cagr)
 }
 
 get_10_cagr <- function(tbbl){
   now <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyod]
   tyfn <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==tyfn]
-  cagr <- round((tyfn/now)^.1-1, 3)
+  cagr <- 100*round((tyfn/now)^.1-1, 3)
   cagr
 }
 
@@ -83,7 +83,7 @@ get_breakdown <- function(tbbl){
   rep_p = case_when(rep_p > 1 ~ 1,
                     rep_p < 0 ~ 0,
                     TRUE ~ rep_p)
-  tibble(jo=jo, rep_p=rep_p, rep=rep, exp_p=exp_p, exp=exp)
+  tibble(jo=jo, rep_p=100*rep_p, rep=rep, exp_p=100*exp_p, exp=exp)
 }
 
 get_current <- function(tbbl){
@@ -141,7 +141,8 @@ teer_description <- teer_description|>
 occ_char <- read_excel(here("data",
                             list.files(here("data"),
                                        pattern = "Occupational Characteristics \\(with skills and interests\\)")),
-                       skip=0)
+                       skip=0)|>
+  mutate(`2021 Census Median Employment Income (Employed)`=as.numeric(`2021 Census Median Employment Income (Employed)`))
 #industry characteristics---------------------------------------------------
 ind_char <- read_excel(here("data",
                             list.files(here("data"),
@@ -247,7 +248,7 @@ cdqjom%>%
 
   #Career Search Tool Job Openings.xlsx-----------------------------
 
-cdqjom%>%
+temp <- cdqjom%>%
   select(-contains("Job Openings"))|>
   full_join(jo)|>
   mutate(`Industry (sub-industry)`=str_to_lower(str_replace_all(Industry," ","_")),
@@ -269,7 +270,11 @@ cdqjom%>%
                                         "All industries",
                                         `Industry (aggregate)`))|>
   filter(NOC_2021!="#T")|>
-  left_join(ftpt)|>
+  left_join(ftpt)
+
+#map(temp, ~sum(is.na(.)))
+
+temp|>
   write.xlsx(here("out",
                   paste0("Career_Search_Tool_Job_Openings_",
                   fyod,
@@ -331,7 +336,7 @@ bind_rows(cstogmu_all,
 
 #HOO BC and Region for new tool.xlsx-----------------------------
 
-hoo|>
+temp <- hoo|>
   select(-contains("Job Openings"))|>
   left_join(occ_char, by=c("#NOC (2021)"="NOC"))|>
   rename(jo= contains("Job Openings") & !contains("Ave"))|>
@@ -388,11 +393,10 @@ career_profiles <- jo|>
   filter(`Geographic Area`=="British Columbia")|>
   mutate(Industry=str_to_lower(str_replace_all(Industry, " ","_")))|>
   full_join(ind_char, by=c("Industry"="Industry (sub-industry)"))|>
-  na.omit()|>
   group_by(NOC_2021, NOC_2021_Description, `Industry (aggregate)`)|>
   summarize(job_openings = sum(jo))|>
   slice_max(job_openings, n=5, with_ties = FALSE)|>
-  mutate(`%`=round(job_openings/sum(job_openings), 2),
+  mutate(`%`=100*round(job_openings/sum(job_openings), 2),
          job_openings=round(job_openings,-1))|>
   group_by(NOC_2021, NOC_2021_Description)|>
   nest()|>
@@ -440,9 +444,9 @@ emp|>
   nest()|>
   mutate(levels=map(data, get_levels))|>
   unnest(levels)|>
-  mutate(cagr_first_five=round((employment_five/employment_current)^(.2)-1, 3),
-         cagr_second_five=round((employment_ten/employment_five)^(.2)-1, 3),
-         cagr_ten_year=round((employment_ten/employment_current)^(.1)-1, 3))|>
+  mutate(cagr_first_five=100*round((employment_five/employment_current)^(.2)-1, 3),
+         cagr_second_five=100*round((employment_ten/employment_five)^(.2)-1, 3),
+         cagr_ten_year=100*round((employment_ten/employment_current)^(.1)-1, 3))|>
   mutate(across(contains("employment"), ~ round(.x, -1)))|>
   select(contains("Area"), contains("cagr"), contains("employment"))|>
   full_join(jo_by_region)|>
@@ -487,6 +491,7 @@ jo|>
   select(`Aggregate Industry`=`Industry (aggregate)`, NOC=NOC_2021, Occupation=NOC_2021_Description, jo)|>
   mutate("Job Openings {fyod}-{tyfn}":=round(jo,-1))|>
   select(-jo)|>
+  na.omit()|>
   write.xlsx(here("out",
                   paste0("top_10_careers_by_aggregate_industry_",
                          fyod,
@@ -625,9 +630,9 @@ wbcip <- emp|>
   unnest(cagrs)|>
   select(-data)|>
   ungroup()|>
-  mutate(current_share=employment_current/sum(employment_current),
-         five_share=employment_five/sum(employment_five),
-         ten_share=employment_ten/sum(employment_ten)
+  mutate(current_share=round(100*employment_current/sum(employment_current),1),
+         five_share=round(100*employment_five/sum(employment_five),1),
+         ten_share=round(100*employment_ten/sum(employment_ten),1)
          )|>
   full_join(wbcip_jo)|>
   select(contains("Industry"),
