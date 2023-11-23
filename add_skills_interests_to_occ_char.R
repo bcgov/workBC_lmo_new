@@ -31,9 +31,6 @@ skills_df <- read_excel(here("data","Top skills by NOC2021 occupations.xlsx"))|>
   select(-data)|>
   unnest(skills)
 
-skills_df|>
-  write.xlsx(here("out","skills.xlsx"))
-
 interests_df <- read_excel(here("data","Occupational interest by NOC2021 occupation.xlsx"))|>
   select(NOC=`NOC 2021`, `Occupational Interest`)|>
   mutate(NOC=paste0("#",NOC))|>
@@ -43,12 +40,6 @@ interests_df <- read_excel(here("data","Occupational interest by NOC2021 occupat
   select(-data)|>
   unnest(interests)
 
-interests_df|>
- write.xlsx(here("out",
-                 paste("Occupational Interests_",
-                       year(today()),
-                       ".xlsx")))
-
 occ_char <- read_excel(here("data",
                             list.files(here("data"),
                                        pattern = "Occupational Characteristics based")),
@@ -56,7 +47,7 @@ occ_char <- read_excel(here("data",
   left_join(skills_df)|>
   left_join(interests_df)
 
-openxlsx::write.xlsx(occ_char, here("data","Occupational Characteristics (with skills and interests).xlsx"), asTable = TRUE)
+openxlsx::write.xlsx(occ_char, here("data","Occupational Characteristics with skills and interests.xlsx"), asTable = TRUE)
 
 
 

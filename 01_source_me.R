@@ -1,16 +1,41 @@
+#' This script produces the LMO files for WorkBC. Requires inputs:
+#'
+#'"employment.csv" (4castviewer)
+#'"ftpt2125NOCp1.csv" (run the SAS scripts... will need to be changed 2027ish)
+#'"ftpt2125NOCp2.csv" (run the SAS scripts... will need to be changed 2027ish)
+#'"industry_characteristics_2023.xlsx" (???)
+#'"job_openings.csv"  (4castviewer)
+#'"LMO 2023E HOO BC and Regions 2023-08-23.xlsx" (Feng)
+#'"Occupational Characteristics with skills and interests.xlsx" (created by script add_skills_interests_to_occ_char.R)
+#'"Occupational Characteristics based on LMO 2023E 2023-08-30.xlsx" (Feng) NOT CALLED BY THIS SCRIPT, BUT USED TO CREATE ^
+#'"Occupational interest by NOC2021 occupation.xlsx" (Amy) NOT CALLED BY THIS SCRIPT, BUT USED TO CREATE ^
+#'"Top skills by NOC2021 occupations.xlsx" (Amy) NOT CALLED BY THIS SCRIPT, BUT USED TO CREATE ^
+#'"WorkBC_Career_Trek_2023-2033_CEU EDIT.xlsx" (WorkBC)
+
+#"constants"------------------------
+fyod <- lubridate::year(lubridate::today()) #first year of data, assumed to be current year, manually set if not.
+fyfn <- fyod+5
+tyfn <- fyod+10
+#libraries---------------------------
 library(tidyverse)
 library(here)
 library(vroom)
 library(readxl)
 library(rvest)
 library(openxlsx)
-library(lubridate)
 library(XLConnect)
-fyod <- 2023 #first year of data
-fyfn <- fyod+5
-tyfn <- fyod+10
+#deal with naming conflicts between packages
+library(conflicted)
+conflicts_prefer(vroom::cols)
+conflicts_prefer(vroom::col_double)
+conflicts_prefer(vroom::col_character)
+conflicts_prefer(dplyr::filter)
+conflicts_prefer(XLConnect::loadWorkbook)
+conflicts_prefer(XLConnect::saveWorkbook)
 #functions------------------
 get_levels <- function(tbbl){
+  #'take a tbbl containing ONLY columns name and value,
+  #'and returns a tbbl containing current employment, employment in 5 years, employment in 10 years.
   employment_current <- tbbl$value[tbbl$name==fyod]
   employment_five <- tbbl$value[tbbl$name==fyfn]
   employment_ten <- tbbl$value[tbbl$name==tyfn]
@@ -19,8 +44,9 @@ get_levels <- function(tbbl){
          employment_ten=employment_ten
   )
 }
-
 get_emp_levels <- function(tbbl){
+  #'takes a tbbl containing columns name, value and Variable and returns a tbbl
+  #'containing current employment, employment in 5 years, employment in 10 years.
   employment_current <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyod]
   employment_five <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyfn]
   employment_ten <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==tyfn]
@@ -29,27 +55,17 @@ get_emp_levels <- function(tbbl){
          employment_ten=employment_ten
   )
 }
-
-write_workbook <- function(data, sheetname, startrow, startcol) {
-  writeWorksheet(
-    wb,
-    data,
-    sheetname,
-    startRow = startrow,
-    startCol = startcol,
-    header = FALSE
-  )
-}
-
-make_wide <- function(dat){#this function take a n by k dataframe, and makes it into a 1 by nk dataframe
-  dat |>
+make_wide <- function(tbbl){
+  #this function take a n by k tbbl, and returns a 1 by nk dataframe
+  tbbl |>
     mutate(row = row_number()) |>
     tidyr::pivot_wider(names_from = row,
                        values_from = c(`Industry (aggregate)`, job_openings, `%`),
                        names_vary = "slowest")
 }
-
 get_cagrs <- function(tbbl){
+  #' takes tbbl with columns name, value, Variable and returns a tbbl
+  #' with the CAGR % for the first five years and second five years
   now <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyod]
   fyfn <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyfn]
   tyfn <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==tyfn]
@@ -57,21 +73,24 @@ get_cagrs <- function(tbbl){
   sfy_cagr <- 100*round((tyfn/fyfn)^.2-1, 3)
   tibble(ffy_cagr=ffy_cagr, sfy_cagr=sfy_cagr)
 }
-
 get_10_cagr <- function(tbbl){
+  #' takes tbbl with columns name, value, Variable and returns the
+  #' CAGR % for the ten year period.
   now <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyod]
   tyfn <- tbbl$value[tbbl$Variable=="Employment" & tbbl$name==tyfn]
   cagr <- 100*round((tyfn/now)^.1-1, 3)
   cagr
 }
-
 get_jos <- function(tbbl){
+  #' takes tbbl with columns name, value, Variable and returns a tbbl with
+  #' the sum of job openings for the first five year and second five year period
   ffy <- sum(tbbl$value[tbbl$Variable=="Job Openings"& tbbl$name %in% (fyod+1):fyfn])
   sfy <- sum(tbbl$value[tbbl$Variable=="Job Openings"& tbbl$name %in% (fyfn+1):tyfn])
   tibble(ffy=ffy, sfy=sfy)
 }
-
 get_breakdown <- function(tbbl){
+  #' Takes a tbbl with columns name, value, Variable, and returns a tbbl containing
+  #' job openings, replacement %, replacement demand, expansion % and expansion demand.
   jo <- sum(tbbl$value[tbbl$Variable=="Job Openings" & tbbl$name %in% (fyod+1):tyfn])
   rep <- sum(tbbl$value[tbbl$Variable=="Replacement Demand" & tbbl$name %in% (fyod+1):tyfn])
   exp <- sum(tbbl$value[tbbl$Variable=="Expansion Demand" & tbbl$name %in% (fyod+1):tyfn])
@@ -85,25 +104,22 @@ get_breakdown <- function(tbbl){
                     TRUE ~ rep_p)
   tibble(jo=jo, rep_p=100*rep_p, rep=rep, exp_p=100*exp_p, exp=exp)
 }
-
 get_current <- function(tbbl){
+  #' Takes a tbbl with columns name, value, Variable, and returns the
+  #' current level of employment.
   tbbl$value[tbbl$Variable=="Employment" & tbbl$name==fyod]
 }
-
 get_10_jo <- function(tbbl){
-  sum(tbbl$value[tbbl$Variable=="Job Openings"& tbbl$name %in% (fyod+1):tyfn])
+  #' Takes a tbbl with columns name, value, Variable, and returns the sum of
+  #' job openings over the 10 year forecast.
+  sum(tbbl$value[tbbl$Variable=="Job Openings" & tbbl$name %in% (fyod+1):tyfn])
 }
-
 #READ IN THE DATA------------------------
-
 #list of NOCs that have videos--------------------------------
-
 career_trek_have_videos <- read_excel(here("data","WorkBC_Career_Trek_2023-2033_CEU EDIT.xlsx"))|>
   select(-contains("Updates"), -contains("employment"), -contains("openings"))|>
   rename(NOC=`NOC 2021...2`)|>
   select(-contains("..."))
-
-
 #full time part time---------------------
 ftpt <- vroom(here("data",
                    list.files(here("data"),
@@ -122,7 +138,7 @@ ftpt <- vroom(here("data",
             `Part-time`=sum(`Part-time`, na.rm = TRUE)
             )|>
   mutate(prop_ft=`Full-time`/(`Full-time`+`Part-time`),
-         `Part-time/full-time`=if_else(prop_ft<.70,
+         `Part-time/full-time`=if_else(prop_ft < .70,
                                        "Higher Chance of Part-Time",
                                        "Higher Chance of Full-Time"
                                        ))|>
@@ -140,8 +156,9 @@ teer_description <- teer_description|>
 #occupation characteristics--------------------------------------
 occ_char <- read_excel(here("data",
                             list.files(here("data"),
-                                       pattern = "Occupational Characteristics \\(with skills and interests\\)")),
-                       skip=0)|>
+                                       pattern = "Occupational Characteristics with skills and interests")),
+                       skip=0,
+                       na = "x")|>
   mutate(`2021 Census Median Employment Income (Employed)`=as.numeric(`2021 Census Median Employment Income (Employed)`))
 #industry characteristics---------------------------------------------------
 ind_char <- read_excel(here("data",
@@ -420,8 +437,8 @@ career_profiles <- jo|>
   rename("Job Openings {fyod}-{tyfn}":=jo)
 
 wb <- loadWorkbook(here("new_templates", "Job Openings by Industry_2016 Census_2023 LMO.xlsx"))
-write_workbook(career_profiles, "Career Profiles", 5, 1)
-write_workbook(`Job Openings by industry`, "Job Openings by industry", 4, 1)
+writeWorksheet(wb, career_profiles, "Career Profiles", 5, 1, header = FALSE)
+writeWorksheet(wb, `Job Openings by industry`, "Job Openings by industry", 4, 1, header = FALSE)
 saveWorkbook(wb, here(
   "out",
   paste0("Job_Openings_by_Industry_LMO_",
@@ -556,8 +573,8 @@ career_profile_regional_excel <-  wbccpd_regional%>%
 
 
 wb <- loadWorkbook(here("new_templates", "WorkBC_Career_Profile_Data.xlsx"))
-write_workbook(wbccpd , "Provincial Outlook", 4, 1)
-write_workbook(career_profile_regional_excel, "Regional Outlook", 5, 1)
+writeWorksheet(wb, wbccpd , "Provincial Outlook", 4, 1, header = FALSE)
+writeWorksheet(wb, career_profile_regional_excel, "Regional Outlook", 5, 1, header = FALSE)
 saveWorkbook(wb, here("out",
                       paste0("WorkBC_Career_Profile_Data_",
                              fyod,
@@ -596,7 +613,7 @@ wbcct <- full_join(wbcct_emp, wbcct_jo)|>
          jo)
 
 wb <- loadWorkbook(here("new_templates", "WorkBC_Career_Trek.xlsx"))
-write_workbook(wbcct , "LMO", 2, 1)
+writeWorksheet(wb, wbcct , "LMO", 2, 1, header = FALSE)
 saveWorkbook(wb, here("out",
                       paste0("WorkBC_Career_Trek_",
                              fyod,
@@ -647,7 +664,7 @@ wbcip <- emp|>
          across(contains("employment"), ~ round(.x, -1)))
 
 wb <- loadWorkbook(here("new_templates", "WorkBC_Industry_Profile.xlsx"))
-write_workbook(wbcip, "Sheet1", 4, 1)
+writeWorksheet(wb, wbcip, "Sheet1", 4, 1, header = FALSE)
 saveWorkbook(wb, here("out",
                       paste0("WorkBC_Industry_Profile_",
                              fyod,
@@ -713,9 +730,9 @@ wbcrpd_s3 <- inner_join(wbcrpd_s3a, wbcrpd_s3b)|>
   arrange(`Geographic Area`)
 
 wb <- loadWorkbook(here("new_templates", "WorkBC_Regional_Profile_Data.xlsx"))
-write_workbook(wbcrpd_s1, "Regional Profiles - LMO", 5, 1)
-write_workbook(wbcrpd_s2, "Top Occupation", 4, 1)
-write_workbook(wbcrpd_s3, "Top Industries", 4, 1)
+writeWorksheet(wb, wbcrpd_s1, "Regional Profiles - LMO", 5, 1, header = FALSE)
+writeWorksheet(wb, wbcrpd_s2, "Top Occupation", 4, 1, header = FALSE)
+writeWorksheet(wb, wbcrpd_s3, "Top Industries", 4, 1, header = FALSE)
 saveWorkbook(wb, here("out",
                       paste0("WorkBC_Regional_Profile_Data_",
                              fyod,
