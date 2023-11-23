@@ -11,6 +11,8 @@
 #'"Occupational interest by NOC2021 occupation.xlsx" (Amy) NOT CALLED BY THIS SCRIPT, BUT USED TO CREATE ^
 #'"Top skills by NOC2021 occupations.xlsx" (Amy) NOT CALLED BY THIS SCRIPT, BUT USED TO CREATE ^
 #'"WorkBC_Career_Trek_2023-2033_CEU EDIT.xlsx" (WorkBC)
+#'
+#'To Run: source me, and then you will have to verify the hoo geography is right...
 
 #"constants"------------------------
 fyod <- lubridate::year(lubridate::today()) #first year of data, assumed to be current year, manually set if not.
@@ -206,8 +208,8 @@ jo_regions <- unique(jo$`Geographic Area`)|>
 hoo_geography <- tibble(name=hoo_sheets,
                         Geography=jo_regions)
 View(hoo_geography)
-# continue <- readline("Does the hoo geography shown in the tab above match ? (answer y or n)")
-# assertthat::assert_that(continue=="y", msg="You need to manually need to fix hoo_geography")
+continue <- readline("Does the hoo geography shown in the tab above match ? (answer y or n)")
+assertthat::assert_that(continue=="y", msg="You need to manually need to fix hoo_geography")
 hoo <- map(set_names(hoo_sheets),
            read_excel, path = here("data","LMO 2023E HOO BC and Regions 2023-08-23.xlsx"),
            range="A5:C500" #cant possibly be more than 500 hoos?
