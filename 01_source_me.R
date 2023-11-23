@@ -13,6 +13,8 @@
 #' "WorkBC_Career_Trek_2023-2033_CEU EDIT.xlsx" (WorkBC)
 #'
 #' To Run: source me, and then you will have to verify the hoo geography is right...
+#'
+#' some code to correct the senior vs seniors management can probably be removed...
 
 # "constants"------------------------
 fyod <- lubridate::year(lubridate::today()) # first year of data, assumed to be current year, manually set if not.
@@ -207,7 +209,11 @@ jo <- vroom(here("data", "job_openings.csv"), skip = 3) |>
   rename(
     NOC_2021 = NOC,
     NOC_2021_Description = Description
-  )
+  ) |>
+  mutate(NOC_2021_Description=if_else(NOC_2021_Description=="Seniors managers - public and private sector",
+                                      "Senior managers - public and private sector",
+                                      NOC_2021_Description
+                                      ))
 # job openings and components-------------------------
 jore <- vroom(here("data", "job_openings.csv"), skip = 3) |>
   janitor::remove_empty() |>
@@ -217,7 +223,12 @@ jore <- vroom(here("data", "job_openings.csv"), skip = 3) |>
     Industry == "All industries"
   ) |>
   pivot_longer(cols = starts_with("2")) |>
-  select(-Industry)
+  select(-Industry)|>
+  mutate(Description=if_else(Description=="Seniors managers - public and private sector",
+                                      "Senior managers - public and private sector",
+                                      Description
+  ))
+
 # employment to add to job openings and components
 emp_to_add_to_jore <- vroom(here("data", "employment.csv"), skip = 3) |>
   janitor::remove_empty() |>
@@ -226,7 +237,11 @@ emp_to_add_to_jore <- vroom(here("data", "employment.csv"), skip = 3) |>
     Industry == "All industries"
   ) |>
   pivot_longer(cols = starts_with("2")) |>
-  select(-Industry)
+  select(-Industry)|>
+  mutate(Description=if_else(Description=="Seniors managers - public and private sector",
+                             "Senior managers - public and private sector",
+                             Description
+  ))
 
 long <- bind_rows(jore, emp_to_add_to_jore) |>
   group_by(NOC, Description, `Geographic Area`) |>
@@ -261,7 +276,11 @@ hoo <- map(set_names(hoo_sheets),
 emp <- vroom(here("data", "employment.csv"), skip = 3) |>
   janitor::remove_empty() |>
   filter(!`Geographic Area` %in% c("North", "South East")) |>
-  pivot_longer(cols = starts_with("2"))
+  pivot_longer(cols = starts_with("2"))|>
+  mutate(Description=if_else(Description=="Seniors managers - public and private sector",
+                             "Senior managers - public and private sector",
+                             Description
+  ))
 
 # PROCESS THE DATA-----------------------------
 # All Occupations' TEERs.xlsx------------------------------
