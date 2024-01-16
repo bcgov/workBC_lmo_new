@@ -1,12 +1,12 @@
 #' This script produces the LMO files for WorkBC. Requires inputs:
-#'
+fyod <- 2023 # first year of data: need to reset each year
 #' "employment.csv" (4castviewer)
 #' "ftpt2125NOCp1.csv" (run the SAS scripts... will need to be changed 2027ish)
 #' "ftpt2125NOCp2.csv" (run the SAS scripts... will need to be changed 2027ish)
 #' "industry_characteristics_2023.xlsx" (???)
 #' "job_openings.csv"  (4castviewer)
 #' "LMO 2023E HOO BC and Regions 2023-08-23.xlsx" (Feng)
-#' "Occupational Characteristics with skills and interests.xlsx" (created by script add_skills_interests_to_occ_char.R)
+#' "Occupational Characteristics w skills interests wages" (created by file add_skills_interests_wages.R)
 #' "Occupational Characteristics based on LMO 2023E 2023-08-30.xlsx" (Feng) NOT CALLED BY THIS SCRIPT, BUT USED TO CREATE ^
 #' "Occupational interest by NOC2021 occupation.xlsx" (Amy) NOT CALLED BY THIS SCRIPT, BUT USED TO CREATE ^
 #' "Top skills by NOC2021 occupations.xlsx" (Amy) NOT CALLED BY THIS SCRIPT, BUT USED TO CREATE ^
@@ -17,7 +17,6 @@
 #' some code to correct the senior vs seniors management can probably be removed...
 
 # "constants"------------------------
-fyod <- lubridate::year(lubridate::today()) # first year of data, assumed to be current year, manually set if not.
 fyfn <- fyod + 5
 tyfn <- fyod + 10
 # libraries---------------------------
@@ -174,16 +173,13 @@ teer_description <- teer_description |>
   select(-`TEER category`, TEER_description = starts_with("Nature"))
 # occupation characteristics--------------------------------------
 occ_char <- read_excel(
-  here(
-    "data",
-    list.files(here("data"),
-      pattern = "Occupational Characteristics with skills and interests"
-    )
-  ),
+  here("data", "Occupational Characteristics w skills interests wages.xlsx"),
   skip = 0,
   na = "x"
-) |>
-  mutate(`2021 Census Median Employment Income (Employed)` = as.numeric(`2021 Census Median Employment Income (Employed)`))
+)|>
+  mutate(`2021 Census Median Employment Income (Employed)` = as.numeric(`2021 Census Median Employment Income (Employed)`),
+         `Calculated Median Annual Salary \n2023`=round(as.numeric(`Calculated Median Annual Salary \n2023`))
+         )
 # industry characteristics---------------------------------------------------
 ind_char <- read_excel(here(
   "data",
@@ -263,7 +259,7 @@ assertthat::assert_that(continue == "y", msg = "You need to manually need to fix
 hoo <- map(set_names(hoo_sheets),
   read_excel,
   path = here("data", "LMO 2023E HOO BC and Regions 2023-08-23.xlsx"),
-  range = "A5:C500" # cant possibly be more than 500 hoos?
+  range = "A5:C500" # can't possibly be more than 500 hoos?
 ) |>
   enframe() |>
   full_join(hoo_geography) |>
@@ -306,7 +302,7 @@ cdqjom <- occ_char |>
     NOC_2021_Description = Description,
     jo = contains("Job Openings") & !contains("Ave"),
     TEER,
-    `Salary (calculated median salary)` = contains("Median Employment Income")
+    `Salary (calculated median salary)` = starts_with("Calculated Median Annual"),#might be the wrong one
   ) |>
   mutate(
     jo = round(jo, -1),
@@ -351,7 +347,7 @@ temp <- cdqjom %>%
     "Job Openings {fyod}-{tyfn}" := jo,
     TEER,
     TEER_description,
-    contains("Salary"),
+    `Salary (calculated median salary)`,
     Link,
     JobBank2,
     `Industry (aggregate)`
@@ -381,34 +377,25 @@ cstogmu_hoo <- hoo |>
   select(NOC = "#NOC (2021)", Region = Geography) |>
   mutate(`Occupational category` = "High opportunity occupations")
 
+all_regions <- unique(cstogmu_hoo$Region) #to create the redundant information WorkBC wants...
+
 cstogmu_stem <- occ_char |>
   filter(`Occ Group: STEM` == "STEM") |>
   select(NOC) |>
-  mutate(
-    Region = "British Columbia",
-    `Occupational category` = "STEM"
-  )
+  mutate(`Occupational category` = "STEM")
 
 cstogmu_trades <- occ_char |>
   filter(`Occ Group: Trades` == "Trades") |>
-  select(NOC,
-    `Occupational category` = `Occ Group: Construction Trades`
-  ) |>
-  mutate(Region = "British Columbia")
+  select(NOC,`Occupational category` = `Occ Group: Construction Trades`)
 
 cstogmu_care <- occ_char |>
   filter(`Occ Group: Deloitte Care Economy` == "Care Economy") |>
   select(NOC) |>
-  mutate(
-    Region = "British Columbia",
-    `Occupational category` = "Care Economy"
-  )
+  mutate(`Occupational category` = "Care Economy")
 
 cstogmu_manage <- occ_char |>
   select(NOC, TEER) |>
-  mutate(
-    Region = "British Columbia",
-    `Occupational category` = if_else(TEER == 0,
+  mutate(`Occupational category` = if_else(TEER == 0,
       "Management occupations",
       "Non-management occupations"
     )
@@ -417,19 +404,18 @@ cstogmu_manage <- occ_char |>
 
 cstogmu_all <- occ_char |>
   select(NOC) |>
-  mutate(
-    Region = "British Columbia",
-    `Occupational category` = "All"
-  )
+  mutate(`Occupational category` = "All")
 
-bind_rows(
+no_regions <- bind_rows(
   cstogmu_all,
   cstogmu_manage,
   cstogmu_care,
   cstogmu_trades,
-  cstogmu_stem,
-  cstogmu_hoo
-) |>
+  cstogmu_stem
+)
+
+crossing(no_regions, Region=all_regions)|> #adds in the redundant region info
+  bind_rows(cstogmu_hoo)|>
   write.xlsx(here(
     "out",
     paste0(
@@ -449,10 +435,10 @@ occ_char |>
   select(
     `Occupation Title` = Description,
     "Job Openings {fyod}-{tyfn}" := jo,
-    "Wage Rate Low {fyod-1}" := `Wage Rate Low`,
-    "Wage Rate Median {fyod-1}" := `Wage Rate Median`,
-    "Wage Rate High {fyod-1}" := `Wage Rate High`,
-    `Median Annual Salary` = contains("Employment Income"),
+    "Wage Rate Low {fyod}" := contains("Wage Rate Low"),
+    "Wage Rate Median {fyod}" := contains("Wage Rate Median"),
+    "Wage Rate High {fyod}" := contains("Wage Rate High"),
+    `Median Annual Salary` = starts_with("Calculated Median Annual"),#might be the wrong one
     Interests,
     `Skills and Competencies (Top 3 together)` = `Skills: Top 3`,
     `First` = Skill1,
@@ -483,10 +469,10 @@ hoo |>
   select(
     `Occupation Title` = Description,
     "Job Openings {fyod}-{tyfn}" := jo,
-    "Wage Rate Low {fyod-1}" := `Wage Rate Low`,
-    "Wage Rate Median {fyod-1}" := `Wage Rate Median`,
-    "Wage Rate High {fyod-1}" := `Wage Rate High`,
-    `Median Annual Salary` = contains("Employment Income"),
+    "Wage Rate Low {fyod}" := contains("Wage Rate Low"),
+    "Wage Rate Median {fyod}" := contains("Wage Rate Median"),
+    "Wage Rate High {fyod}" := contains("Wage Rate High"),
+    `Median Annual Salary` = starts_with("Calculated Median Annual"),#might be the wrong one
     NOC = `#NOC (2021)`,
     `Occupational Interest` = Interests,
     `Skills and Compentencies (Top 3)` = `Skills: Top 3`
@@ -658,7 +644,7 @@ wbccpd <- long |>
     jos = map(data, get_jos),
     breakdown = map(data, get_breakdown),
     current_employment = map_dbl(data, get_current)
-  ) |>
+  )|>
   select(-data) |>
   unnest(cagr) |>
   unnest(jos) |>
@@ -906,3 +892,22 @@ saveWorkbook(wb, here(
     ".xlsx"
   )
 ))
+
+#Occupational interests---------------------------------
+
+occ_int <- read_excel(here("data","Occupational interest by NOC2021 occupation.xlsx"))|>
+  select(NOC=`NOC 2021`, Options, `Occupational Interest`)|>
+  mutate(NOC=paste0("#",NOC))
+
+  write.xlsx(occ_int, here(
+    "out",
+    paste0(
+      "Occupational_Interests_",
+      fyod,
+      ".xlsx"
+    )
+  ))
+
+
+
+
