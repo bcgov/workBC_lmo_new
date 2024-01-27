@@ -321,12 +321,12 @@ cdqjom <- occ_char |>
   rename("Job Openings {fyod}-{tyfn}" := jo)
 
 cdqjom %>%
-  write_csv(here(
+  write.xlsx(here(
     "out",
     paste0(
       "Career_Discovery_Quizzes_Job_Openings_master_",
       fyod,
-      ".csv"
+      ".xlsx"
     )
   ))
 
@@ -908,6 +908,22 @@ occ_int <- read_excel(here("data","Occupational interest by NOC2021 occupation.x
     )
   ))
 
+#wage data-----------------------------------
 
+desired_nocs <- occ_char|>
+    select(NOC, `Occupation Title`=Description)|>
+    mutate(NOC=str_remove(NOC,"#"))
 
+wage <-  read_excel(here("data","WorkBC_2023_Wage_Data.xlsx"))|>
+  right_join(desired_nocs)|>
+  arrange(NOC)
+
+write.xlsx(wage, here(
+  "out",
+  paste0(
+    "Wages_where_NOCS_00011:00015_rolled_into_00018_(missing)_",
+    fyod,
+    ".xlsx"
+  )
+))
 
