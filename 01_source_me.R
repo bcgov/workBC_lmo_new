@@ -36,6 +36,12 @@ conflicts_prefer(dplyr::filter)
 conflicts_prefer(XLConnect::loadWorkbook)
 conflicts_prefer(XLConnect::saveWorkbook)
 # functions------------------
+make_na <- function(vec){
+  vec <- tibble("vec"=vec)|>
+    mutate(vec=if_else(vec==0,NA_character_,vec),
+           vec=as.numeric(vec))
+  return(vec$vec)
+}
 get_levels <- function(tbbl) {
   #' take a tbbl containing ONLY columns name and value,
   #' and returns a tbbl containing current employment, employment in 5 years, employment in 10 years.
@@ -916,7 +922,8 @@ desired_nocs <- occ_char|>
 
 wage <-  read_excel(here("data","WorkBC_2023_Wage_Data.xlsx"))|>
   right_join(desired_nocs)|>
-  arrange(NOC)
+  arrange(NOC)|>
+  mutate(across(starts_with("ESDC")|starts_with("Calculated"), make_na))
 
 write.xlsx(wage, here(
   "out",
