@@ -38,7 +38,7 @@ conflicts_prefer(XLConnect::saveWorkbook)
 # functions------------------
 make_na <- function(vec){
   vec <- tibble("vec"=vec)|>
-    mutate(vec=if_else(vec==0,NA_character_,vec),
+    mutate(vec=if_else(vec==0, NA_character_, vec),
            vec=as.numeric(vec))
   return(vec$vec)
 }
@@ -933,4 +933,21 @@ write.xlsx(wage, here(
     ".xlsx"
   )
 ))
+
+# top skills by occupation---------------------------------
+
+skills <-  read_excel(here("data","Top skills by NOC2021 occupations.xlsx"))|>
+  right_join(desired_nocs, by=c("NOC2021"="NOC", "NOC2021 Title"="Occupation Title"))|>
+  arrange(NOC2021)
+
+write.xlsx(skills, here(
+  "out",
+  paste0(
+    "Top skills_where_NOCS_00011:00015_rolled_into_00018_(missing)_",
+    fyod,
+    ".xlsx"
+  )
+))
+
+
 
