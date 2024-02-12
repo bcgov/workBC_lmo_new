@@ -37,9 +37,11 @@ conflicts_prefer(XLConnect::loadWorkbook)
 conflicts_prefer(XLConnect::saveWorkbook)
 # functions------------------
 fill_skills <- function(tbbl){
-  tbbl <- tbbl|> #a one row tibble
+  if(nrow(tbbl)==1){ #if there is no skill data...
+  tbbl <- tbbl|>
     slice_sample(n=length(skill_names), replace=TRUE) #replicate columns to fit 35ish skill names
   tbbl$`Skills & Competencies` <- skill_names #add in the skill names
+  }
   return(tbbl)
 }
 
