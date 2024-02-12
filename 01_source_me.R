@@ -36,6 +36,13 @@ conflicts_prefer(dplyr::filter)
 conflicts_prefer(XLConnect::loadWorkbook)
 conflicts_prefer(XLConnect::saveWorkbook)
 # functions------------------
+fill_skills <- function(tbbl){
+  tbbl <- tbbl|> #a one row tibble
+    slice_sample(n=length(skill_names), replace=TRUE) #replicate columns to fit 35ish skill names
+  tbbl$`Skills & Competencies` <- skill_names #add in the skill names
+  return(tbbl)
+}
+
 make_na <- function(vec){
   vec <- tibble("vec"=vec)|>
     mutate(vec=if_else(vec==0, NA_character_, vec),
@@ -934,11 +941,21 @@ write.xlsx(wage, here(
   )
 ))
 
-# top skills by occupation---------------------------------
+#' top skills by occupation---------------------------------
+#' The skills data does not match LMO occupations: below we hacky replace two of the NOCs
 
-skills <-  read_excel(here("data","Top skills by NOC2021 occupations.xlsx"))|>
-  right_join(desired_nocs, by=c("NOC2021"="NOC", "NOC2021 Title"="Occupation Title"))|>
-  arrange(NOC2021)
+raw_skills <-  read_excel(here("data","Top skills by NOC2021 occupations.xlsx")) #this file has missing data
+
+skill_names <- unique(raw_skills$`Skills & Competencies`)
+
+skills <- raw_skills|>
+  right_join(desired_nocs, by=c("NOC2021"="NOC", "NOC2021 Title"="Occupation Title"))|> #the desired NOCs
+  arrange(NOC2021)|>
+  group_by(NOC2021, `NOC2021 Title`)|>
+  nest()|>
+  mutate(data=map(data, fill_skills))|>
+  unnest(data)
+
 
 write.xlsx(skills, here(
   "out",
