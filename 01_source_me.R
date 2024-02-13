@@ -45,6 +45,17 @@ fill_skills <- function(tbbl){
   return(tbbl)
 }
 
+fill_interests <- function(tbbl){
+  if(nrow(tbbl)==1){ #if there is no data...
+    tbbl <- tbbl|>
+      slice_sample(n=3, replace=TRUE) #replicate columns to fit 3 interests
+    tbbl$Options <- c("Primary","Secondary", "Tertiary") #add in the option names
+  }
+  return(tbbl)
+}
+
+
+
 make_na <- function(vec){
   vec <- tibble("vec"=vec)|>
     mutate(vec=if_else(vec==0, NA_character_, vec),
@@ -908,20 +919,6 @@ saveWorkbook(wb, here(
   )
 ))
 
-#Occupational interests---------------------------------
-
-occ_int <- read_excel(here("data","Occupational interest by NOC2021 occupation.xlsx"))|>
-  select(NOC=`NOC 2021`, Options, `Occupational Interest`)|>
-  mutate(NOC=paste0("#",NOC))
-
-  write.xlsx(occ_int, here(
-    "out",
-    paste0(
-      "Occupational_Interests_",
-      fyod,
-      ".xlsx"
-    )
-  ))
 
 #wage data-----------------------------------
 
@@ -944,7 +941,7 @@ write.xlsx(wage, here(
 ))
 
 #' top skills by occupation---------------------------------
-#' The skills data does not match LMO occupations: below we hacky replace two of the NOCs
+#' The skills data does not match LMO occupations:
 
 raw_skills <-  read_excel(here("data","Top skills by NOC2021 occupations.xlsx")) #this file has missing data
 
@@ -968,5 +965,25 @@ write.xlsx(skills, here(
   )
 ))
 
+#Occupational interests---------------------------------
 
+occ_int <- read_excel(here("data","Occupational interest by NOC2021 occupation.xlsx"))|>
+  select(NOC=`NOC 2021`, Options, `Occupational Interest`)|>
+  right_join(desired_nocs)|>
+  select(-`Occupation Title`)|>
+  group_by(NOC)|>
+  nest()|>
+  mutate(data=map(data, fill_interests))|>
+  unnest(data)|>
+  arrange(NOC)|>
+  mutate(NOC=paste0("#",NOC))
+
+write.xlsx(occ_int, here(
+  "out",
+  paste0(
+    "Occupational_Interests_",
+    fyod,
+    ".xlsx"
+  )
+))
 
