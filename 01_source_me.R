@@ -967,7 +967,7 @@ write.xlsx(skills, here(
 
 #Occupational interests---------------------------------
 
-occ_int <- read_excel(here("data","Occupational interest by NOC2021 occupation.xlsx"))|>
+occ_int <- read_excel(here("data","Occupational interest by NOC2021 occupation_plus_5.xlsx"))|>
   select(NOC=`NOC 2021`, Options, `Occupational Interest`)|>
   right_join(desired_nocs)|>
   select(-`Occupation Title`)|>
