@@ -1,20 +1,16 @@
 #' This script produces the LMO files for WorkBC. Requires inputs:
-fyod <- 2023 # first year of data: need to reset each year
-#' "employment.csv" (4castviewer)
+fyod <- 2024 # first year of data: need to reset each year
+#' "employment.csv" (4castviewer: all nocs, all industries, all regions)
+#' "job_openings.csv"  (4castviewer: all nocs, all industries, all regions)
 #' "ftpt2125NOCp1.csv" (run the SAS scripts... will need to be changed 2027ish)
 #' "ftpt2125NOCp2.csv" (run the SAS scripts... will need to be changed 2027ish)
-#' "industry_characteristics_2023.xlsx" (???)
-#' "job_openings.csv"  (4castviewer)
-#' "LMO 2023E HOO BC and Regions 2023-08-23.xlsx" (Feng)
-#' "Occupational Characteristics w skills interests wages" (created by file add_skills_interests_wages.R)
-#' "Occupational Characteristics based on LMO 2023E 2023-08-30.xlsx" (Feng) NOT CALLED BY THIS SCRIPT, BUT USED TO CREATE ^
-#' "Occupational interest by NOC2021 occupation.xlsx" (Amy) NOT CALLED BY THIS SCRIPT, BUT USED TO CREATE ^
-#' "Top skills by NOC2021 occupations.xlsx" (Amy) NOT CALLED BY THIS SCRIPT, BUT USED TO CREATE ^
-#' "WorkBC_Career_Trek_2023-2033_CEU EDIT.xlsx" (WorkBC)
+#'  lmo64_agg_stokes_mapping.csv
+#'  one file that contains "HOO" in its name (Feng)
+#'  one file that contains "Wage_Data" in its name (Nicole)
+#'  one file that contains "Occupational Characteristics in its name (Nicole)
+#' "one file that contains Top skills in its name (ONET)
 #'
 #' To Run: source me, and then you will have to verify the hoo geography is right...
-#'
-#' some code to correct the senior vs seniors management can probably be removed...
 
 # "constants"------------------------
 fyfn <- fyod + 5
@@ -36,32 +32,7 @@ conflicts_prefer(dplyr::filter)
 conflicts_prefer(XLConnect::loadWorkbook)
 conflicts_prefer(XLConnect::saveWorkbook)
 # functions------------------
-fill_skills <- function(tbbl){
-  if(nrow(tbbl)==1){ #if there is no skill data...
-  tbbl <- tbbl|>
-    slice_sample(n=length(skill_names), replace=TRUE) #replicate columns to fit 35ish skill names
-  tbbl$`Skills & Competencies` <- skill_names #add in the skill names
-  }
-  return(tbbl)
-}
 
-fill_interests <- function(tbbl){
-  if(nrow(tbbl)==1){ #if there is no data...
-    tbbl <- tbbl|>
-      slice_sample(n=3, replace=TRUE) #replicate columns to fit 3 interests
-    tbbl$Options <- c("Primary","Secondary", "Tertiary") #add in the option names
-  }
-  return(tbbl)
-}
-
-
-
-make_na <- function(vec){
-  vec <- tibble("vec"=vec)|>
-    mutate(vec=if_else(vec==0, NA_character_, vec),
-           vec=as.numeric(vec))
-  return(vec$vec)
-}
 get_levels <- function(tbbl) {
   #' take a tbbl containing ONLY columns name and value,
   #' and returns a tbbl containing current employment, employment in 5 years, employment in 10 years.
@@ -92,7 +63,7 @@ make_wide <- function(tbbl) {
     mutate(row = row_number()) |>
     tidyr::pivot_wider(
       names_from = row,
-      values_from = c(`Industry (aggregate)`, job_openings, `%`),
+      values_from = c(aggregate_industry, job_openings, `%`),
       names_vary = "slowest"
     )
 }
@@ -151,12 +122,35 @@ get_10_jo <- function(tbbl) {
   #' job openings over the 10 year forecast.
   sum(tbbl$value[tbbl$Variable == "Job Openings" & tbbl$name %in% (fyod + 1):tyfn])
 }
-# READ IN THE DATA------------------------
-# list of NOCs that have videos--------------------------------
-career_trek_have_videos <- read_excel(here("data", "WorkBC_Career_Trek_2023-2033_CEU EDIT.xlsx")) |>
-  select(-contains("Updates"), -contains("employment"), -contains("openings")) |>
-  rename(NOC = `NOC 2021...2`) |>
-  select(-contains("..."))
+
+get_skill_names <- function(tbbl){
+  on_own <- tbbl$`Skills & Competencies`
+  together <- paste(on_own, collapse = ", ")
+  temp <- as_tibble(t(c(on_own, together)), .name_repair = "minimal")
+  colnames(temp) <- c("Skill1", "Skill2", "Skill3", "Skills: Top 3")
+  temp
+}
+
+fix_region_names <- function(region){
+  region|>
+    str_replace_all("Mainland South West", "Mainland/Southwest")|>
+    str_replace_all("Vancouver Island Coast", "Vancouver Island/Coast")|>
+    str_replace_all("North Coast & Nechako", "North Coast and Nechako")|>
+    str_replace_all("Thompson Okanagan", "Thompson-Okanagan")|>
+    str_replace_all("North East", "Northeast")
+}
+
+#Read in the data------------------------------
+
+skills_df <- read_excel(here("data",list.files(here("data"), pattern = "Top skills")))|>
+  group_by(NOC=NOC2021)|>
+  mutate(NOC=paste0("#",NOC))|>
+  slice_max(`Importance Score`, n=3, with_ties = FALSE)|>
+  nest()|>
+  mutate(skills=map(data, get_skill_names))|>
+  select(-data)|>
+  unnest(skills)
+
 # full time part time---------------------
 ftpt <- vroom(
   here(
@@ -190,34 +184,49 @@ ftpt <- vroom(
   mutate(NOC_2021 = paste0("#", NOC_2021))
 senior_managers <- tibble(NOC_2021 = "#00018", `Part-time/full-time` = "Higher Chance of Full-Time") # based on components
 ftpt <- bind_rows(ftpt, senior_managers)
-# get teer descriptions from web------------------------------------
-teer_description <- read_html("https://noc.esdc.gc.ca/Training/TeerCategory") |>
-  html_table()
-teer_description <- teer_description[[1]]
-teer_description <- teer_description |>
-  mutate(TEER = as.character(`TEER category`)) |>
-  select(-`TEER category`, TEER_description = starts_with("Nature"))
+
+teer_description <- tibble(
+  TEER_description = c("Management",
+                       "University Degree",
+                       "College Diploma or Apprenticeship, 2 or more years",
+                       "College Diploma or Apprenticeship, less than 2 years",
+                       "High School Diploma",
+                        "No Formal Education"),
+  TEER=as.character(0:5)
+  )
+
 # occupation characteristics--------------------------------------
 occ_char <- read_excel(
-  here("data", "Occupational Characteristics w skills interests wages.xlsx"),
-  skip = 0,
+  here("data",
+       list.files(here("data"),
+                  pattern = "Occupational Characteristics")),
+  skip = 3,
   na = "x"
-)|>
-  mutate(`2021 Census Median Employment Income (Employed)` = as.numeric(`2021 Census Median Employment Income (Employed)`),
-         `Calculated Median Annual Salary \n2023`=round(as.numeric(`Calculated Median Annual Salary \n2023`))
-         )
+)
+
+#wages-----------------------------------------
+
+wages <- read_excel(here("data", list.files(here("data"),pattern = "Wage_Data")),
+                    skip = 0,
+                    na = "-")|>
+  mutate(NOC=paste0("#", str_pad(NOC, width=5, side="left", pad="0")))|>
+  select(NOC, contains("calculated"))
+
+occ_char <- occ_char|>
+  full_join(wages)
+
 # industry characteristics---------------------------------------------------
-ind_char <- read_excel(here(
+
+ind_char <- read_csv(here(
   "data",
   list.files(here("data"),
-    pattern = "industry"
+    pattern = "lmo64"
   )
-)) |>
-  transmute(
-    `Industry (sub-industry)` = lmo_detailed_industry,
-    `Industry (aggregate)` = str_to_title(str_replace_all(aggregate_industry, "_", " "))
-  ) |>
+))|>
+  select(-lmo_ind_code, -stokes_industry)|>
   distinct()
+
+
 # job openings----------------------------------------------
 jo <- vroom(here("data", "job_openings.csv"), skip = 3) |>
   janitor::remove_empty() |>
@@ -231,11 +240,8 @@ jo <- vroom(here("data", "job_openings.csv"), skip = 3) |>
   rename(
     NOC_2021 = NOC,
     NOC_2021_Description = Description
-  ) |>
-  mutate(NOC_2021_Description=if_else(NOC_2021_Description=="Seniors managers - public and private sector",
-                                      "Senior managers - public and private sector",
-                                      NOC_2021_Description
-                                      ))
+  )
+
 # job openings and components-------------------------
 jore <- vroom(here("data", "job_openings.csv"), skip = 3) |>
   janitor::remove_empty() |>
@@ -245,11 +251,7 @@ jore <- vroom(here("data", "job_openings.csv"), skip = 3) |>
     Industry == "All industries"
   ) |>
   pivot_longer(cols = starts_with("2")) |>
-  select(-Industry)|>
-  mutate(Description=if_else(Description=="Seniors managers - public and private sector",
-                                      "Senior managers - public and private sector",
-                                      Description
-  ))
+  select(-Industry)
 
 # employment to add to job openings and components
 emp_to_add_to_jore <- vroom(here("data", "employment.csv"), skip = 3) |>
@@ -259,20 +261,20 @@ emp_to_add_to_jore <- vroom(here("data", "employment.csv"), skip = 3) |>
     Industry == "All industries"
   ) |>
   pivot_longer(cols = starts_with("2")) |>
-  select(-Industry)|>
-  mutate(Description=if_else(Description=="Seniors managers - public and private sector",
-                             "Senior managers - public and private sector",
-                             Description
-  ))
+  select(-Industry)
 
 long <- bind_rows(jore, emp_to_add_to_jore) |>
   group_by(NOC, Description, `Geographic Area`) |>
   nest()
 
 # high opportunity occupations------------------------------------
-hoo_sheets <- head(excel_sheets(here("data", "LMO 2023E HOO BC and Regions 2023-08-23.xlsx")), -1) |>
+
+hoo_sheets <- head(excel_sheets(here("data", list.files(here("data"), pattern = "HOO"))), -1) |>
   sort()
-jo_regions <- unique(jo$`Geographic Area`) |>
+
+jo_regions <- jo$`Geographic Area`|>
+  unique()|>
+  fix_region_names()|>
   sort()
 
 hoo_geography <- tibble(
@@ -280,11 +282,11 @@ hoo_geography <- tibble(
   Geography = jo_regions
 )
 View(hoo_geography)
-continue <- readline("Does the hoo geography shown in the tab above match ? (answer y or n)")
-assertthat::assert_that(continue == "y", msg = "You need to manually need to fix hoo_geography")
+# continue <- readline("Does the hoo geography shown in the tab above match ? (answer y or n)")
+# assertthat::assert_that(continue == "y", msg = "You need to manually need to fix hoo_geography")
 hoo <- map(set_names(hoo_sheets),
   read_excel,
-  path = here("data", "LMO 2023E HOO BC and Regions 2023-08-23.xlsx"),
+  path = here("data", list.files(here("data"), pattern = "HOO")),
   range = "A5:C500" # can't possibly be more than 500 hoos?
 ) |>
   enframe() |>
@@ -298,27 +300,9 @@ hoo <- map(set_names(hoo_sheets),
 emp <- vroom(here("data", "employment.csv"), skip = 3) |>
   janitor::remove_empty() |>
   filter(!`Geographic Area` %in% c("North", "South East")) |>
-  pivot_longer(cols = starts_with("2"))|>
-  mutate(Description=if_else(Description=="Seniors managers - public and private sector",
-                             "Senior managers - public and private sector",
-                             Description
-  ))
+  pivot_longer(cols = starts_with("2"))
 
 # PROCESS THE DATA-----------------------------
-# All Occupations' TEERs.xlsx------------------------------
-
-occ_char |>
-  select(NOC_2021 = NOC, NOC_2021_Description = Description) |>
-  mutate(TEER = str_sub(NOC_2021, 3, 3)) |>
-  inner_join(teer_description) |>
-  write.xlsx(here(
-    "out",
-    paste0(
-      "All_Occupations'_TEERs_",
-      fyod,
-      ".xlsx"
-    )
-  ))
 
 # CareerDiscoveryQuizzesJobOpenings- master.csv--------------------------------
 
@@ -346,26 +330,14 @@ cdqjom <- occ_char |>
   relocate(TEER_description, .after = TEER) |>
   rename("Job Openings {fyod}-{tyfn}" := jo)
 
-cdqjom %>%
-  write.xlsx(here(
-    "out",
-    paste0(
-      "Career_Discovery_Quizzes_Job_Openings_master_",
-      fyod,
-      ".xlsx"
-    )
-  ))
 
-# Career Search Tool Job Openings.xlsx-----------------------------
+# Career_Search_Tool_Job_Openings----------------------------
 
 temp <- cdqjom %>%
   select(-contains("Job Openings")) |>
-  full_join(jo) |>
-  mutate(
-    `Industry (sub-industry)` = str_to_lower(str_replace_all(Industry, " ", "_")),
-    jo = round(jo, -1)
-  ) |>
-  full_join(ind_char) |>
+  inner_join(jo)|>
+  mutate(jo = round(jo, -1))|>
+  fuzzyjoin::stringdist_full_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
   select(NOC_2021,
     NOC_2021_Description,
     `Industry (sub-industry)` = Industry,
@@ -376,34 +348,36 @@ temp <- cdqjom %>%
     `Salary (calculated median salary)`,
     Link,
     JobBank2,
-    `Industry (aggregate)`
+    `Industry (aggregate)`=aggregate_industry
   ) |>
-  mutate(`Industry (aggregate)` = if_else(is.na(`Industry (aggregate)`),
-    "All industries",
-    `Industry (aggregate)`
-  )) |>
+  mutate(`Industry (aggregate)` = if_else(is.na(`Industry (aggregate)`),"All industries", `Industry (aggregate)`),
+         `Industry (aggregate)` = str_to_title(`Industry (aggregate)`),
+         `Industry (sub-industry)` = str_to_title(`Industry (sub-industry)`),
+         Region=fix_region_names(Region)
+         ) |>
   filter(NOC_2021 != "#T") |>
   left_join(ftpt)
 
-# map(temp, ~sum(is.na(.)))
+length(unique(temp$NOC_2021))
 
-temp |>
-  write.xlsx(here(
+write.xlsx(temp, here(
     "out",
     paste0(
       "Career_Search_Tool_Job_Openings_",
       fyod,
       ".xlsx"
+      )
     )
-  ))
+    )
 
 # career_search_tool_occupation_groups_manual_update.xlsx-----------------
 
-cstogmu_hoo <- hoo |>
-  select(NOC = "#NOC (2021)", Region = Geography) |>
-  mutate(`Occupational category` = "High opportunity occupations")
+all_regions <- fix_region_names(unique(hoo$Geography)) #to create the redundant information WorkBC wants...
 
-all_regions <- unique(cstogmu_hoo$Region) #to create the redundant information WorkBC wants...
+cstogmu_hoo <- hoo |>
+  select(NOC = "#NOC (2021)", Region=Geography) |>
+  mutate(`Occupational category` = "High opportunity occupations",
+         Region=fix_region_names(Region))
 
 cstogmu_stem <- occ_char |>
   filter(`Occ Group: STEM` == "STEM") |>
@@ -440,8 +414,9 @@ no_regions <- bind_rows(
   cstogmu_stem
 )
 
-crossing(no_regions, Region=all_regions)|> #adds in the redundant region info
+crossing(no_regions, Region=all_regions)|>
   bind_rows(cstogmu_hoo)|>
+  na.omit()|>
   write.xlsx(here(
     "out",
     paste0(
@@ -454,27 +429,32 @@ crossing(no_regions, Region=all_regions)|> #adds in the redundant region info
 # HOO BC and Region for new tool.xlsx-----------------------------
 
 occ_char |>
+  left_join(skills_df)|>
   select(-contains("Job Openings")) |>
   right_join(hoo, by = c("NOC" = "#NOC (2021)")) |>
   rename(jo = contains("Job Openings") & !contains("Ave")) |>
-  mutate(jo = round(jo, -1)) |>
+  mutate(jo = round(jo, -1))|>
+  unite(Interests, `Occupational Interest (Primary)`,
+  `Occupational Interest (Secondary)`,
+  `Occupational Interest (Tertiary)`, sep = ", ", na.rm = TRUE)|>
   select(
     `Occupation Title` = Description,
     "Job Openings {fyod}-{tyfn}" := jo,
     "Wage Rate Low {fyod}" := contains("Wage Rate Low"),
     "Wage Rate Median {fyod}" := contains("Wage Rate Median"),
     "Wage Rate High {fyod}" := contains("Wage Rate High"),
-    `Median Annual Salary` = starts_with("Calculated Median Annual"),#might be the wrong one
+    `Median Annual Salary` = starts_with("Calculated Median Annual"),
     Interests,
-    `Skills and Competencies (Top 3 together)` = `Skills: Top 3`,
-    `First` = Skill1,
-    `Second` = Skill2,
-    `Third` = Skill3,
+    `Skills and Competencies (Top 3 together)`=`Skills: Top 3`,
+    First=Skill1,
+    Second=Skill2,
+    Third=Skill3,
     `#NOC` = NOC,
     Geography
   ) |>
   mutate(NOC = str_sub(`#NOC`, 2, -1), .before = `#NOC`) |>
   mutate(TEER = str_sub(NOC, 2, 2), .before = Geography) |>
+  mutate(Geography=fix_region_names(Geography))|>
   write.xlsx(here(
     "out",
     paste0(
@@ -484,46 +464,12 @@ occ_char |>
     )
   ))
 
-# HOO List.xlsx-----------------------------
-
-hoo |>
-  filter(Geography == "British Columbia") |>
-  select(-contains("Job Openings")) |>
-  left_join(occ_char, by = c("#NOC (2021)" = "NOC")) |>
-  rename(jo = contains("Job Openings") & !contains("Ave")) |>
-  mutate(jo = round(jo, -1)) |>
-  select(
-    `Occupation Title` = Description,
-    "Job Openings {fyod}-{tyfn}" := jo,
-    "Wage Rate Low {fyod}" := contains("Wage Rate Low"),
-    "Wage Rate Median {fyod}" := contains("Wage Rate Median"),
-    "Wage Rate High {fyod}" := contains("Wage Rate High"),
-    `Median Annual Salary` = starts_with("Calculated Median Annual"),#might be the wrong one
-    NOC = `#NOC (2021)`,
-    `Occupational Interest` = Interests,
-    `Skills and Compentencies (Top 3)` = `Skills: Top 3`
-  ) |>
-  mutate(
-    NOC = str_sub(NOC, 2, -1),
-    TEER = str_sub(NOC, 2, 2)
-  ) |>
-  write.xlsx(here(
-    "out",
-    paste0(
-      "HOO_List_",
-      fyod,
-      ".xlsx"
-    )
-  ))
-
 # Job Openings by Industry_LMO.xlsx------------------------
 
 career_profiles <- jo |>
   filter(`Geographic Area` == "British Columbia") |>
-  mutate(Industry = str_to_lower(str_replace_all(Industry, " ", "_"))) |>
-  full_join(ind_char, by = c("Industry" = "Industry (sub-industry)")) |>
-  filter(!is.na(`Industry (aggregate)`)) |>
-  group_by(NOC_2021, NOC_2021_Description, `Industry (aggregate)`) |>
+  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
+  group_by(NOC_2021, NOC_2021_Description, aggregate_industry) |>
   summarize(job_openings = sum(jo)) |>
   slice_max(job_openings, n = 5, with_ties = FALSE) |>
   mutate(
@@ -545,16 +491,15 @@ career_profiles <- jo |>
     `Geographic Area` == "British Columbia",
     NOC_2021 == "#T"
   ) |>
-  mutate(Industry = str_to_lower(str_replace_all(Industry, " ", "_"))) |>
-  full_join(ind_char, by = c("Industry" = "Industry (sub-industry)")) |>
+  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
   na.omit() |>
-  group_by(`Industry (aggregate)`) |>
+  group_by(aggregate_industry) |>
   summarize(jo = round(sum(jo), -1)) |>
   rename("Job Openings {fyod}-{tyfn}" := jo)
 
-wb <- loadWorkbook(here("new_templates", "Job Openings by Industry_2016 Census_2023 LMO.xlsx"))
+wb <- loadWorkbook(here("templates", list.files(here("templates"), pattern = "Job_Openings_by_Industry")))
 writeWorksheet(wb, career_profiles, "Career Profiles", 5, 1, header = FALSE)
-writeWorksheet(wb, `Job Openings by industry`, "Job Openings by industry", 4, 1, header = FALSE)
+writeWorksheet(wb, `Job Openings by industry`, "Job Openings by industry", 3, 1, header = FALSE)
 saveWorkbook(wb, here(
   "out",
   paste0(
@@ -575,59 +520,6 @@ jo_by_region <- jo |>
   ungroup() |>
   select(`Geographic Area`, ten_sum_jo = jo)
 
-emp |>
-  filter(
-    NOC == "#T",
-    Industry == "All industries"
-  ) |>
-  select(-NOC, -Description, -Variable, -Industry) |>
-  group_by(`Geographic Area`) |>
-  nest() |>
-  mutate(levels = map(data, get_levels)) |>
-  unnest(levels) |>
-  mutate(
-    cagr_first_five = 100 * round((employment_five / employment_current)^(.2) - 1, 3),
-    cagr_second_five = 100 * round((employment_ten / employment_five)^(.2) - 1, 3),
-    cagr_ten_year = 100 * round((employment_ten / employment_current)^(.1) - 1, 3)
-  ) |>
-  mutate(across(contains("employment"), ~ round(.x, -1))) |>
-  select(contains("Area"), contains("cagr"), contains("employment")) |>
-  full_join(jo_by_region) |>
-  write.xlsx(here(
-    "out",
-    paste0(
-      "LMO_Forecasted_Employment_Growth_",
-      fyod,
-      ".xlsx"
-    )
-  ))
-
-# top_5_careers_by_aggregate_industry.xlsx------------------------------
-
-emp |>
-  filter(
-    NOC != "#T",
-    `Geographic Area` == "British Columbia",
-    name == fyod
-  ) |>
-  mutate(Industry = str_to_lower(str_replace_all(Industry, " ", "_"))) |>
-  full_join(ind_char, by = c("Industry" = "Industry (sub-industry)")) |>
-  group_by(NOC, Description, `Industry (aggregate)`) |>
-  summarize(emp = sum(value)) |>
-  group_by(`Industry (aggregate)`, .add = FALSE) |>
-  slice_max(emp, n = 5, with_ties = FALSE) |>
-  select(`Aggregate Industry` = `Industry (aggregate)`, NOC, Occupation = Description, emp) |>
-  mutate("Employment {fyod}" := round(emp, -1)) |>
-  select(-emp) |>
-  write.xlsx(here(
-    "out",
-    paste0(
-      "top_5_careers_by_aggregate_industry_",
-      fyod,
-      ".xlsx"
-    )
-  ))
-
 # top_10_careers_by_aggregate_industry.xlsx----------------------------
 
 jo |>
@@ -635,13 +527,12 @@ jo |>
     NOC_2021 != "#T",
     `Geographic Area` == "British Columbia"
   ) |>
-  mutate(Industry = str_to_lower(str_replace_all(Industry, " ", "_"))) |>
-  full_join(ind_char, by = c("Industry" = "Industry (sub-industry)")) |>
-  group_by(NOC_2021, NOC_2021_Description, `Industry (aggregate)`) |>
+  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
+  group_by(NOC_2021, NOC_2021_Description, aggregate_industry)|>
   summarize(jo = sum(jo)) |>
-  group_by(`Industry (aggregate)`, .add = FALSE) |>
+  group_by(aggregate_industry, .add = FALSE) |>
   slice_max(jo, n = 10, with_ties = FALSE) |>
-  select(`Aggregate Industry` = `Industry (aggregate)`, NOC = NOC_2021, Occupation = NOC_2021_Description, jo) |>
+  select(`Aggregate Industry` = aggregate_industry, NOC = NOC_2021, Occupation = NOC_2021_Description, jo) |>
   mutate("Job Openings {fyod}-{tyfn}" := round(jo, -1)) |>
   select(-jo) |>
   na.omit() |>
@@ -667,6 +558,7 @@ wbccpd <- long |>
   ) %>%
   mutate(
     cagr = map(data, get_cagrs),
+    ty_cagr=map_dbl(data, get_10_cagr),
     jos = map(data, get_jos),
     breakdown = map(data, get_breakdown),
     current_employment = map_dbl(data, get_current)
@@ -681,6 +573,8 @@ wbccpd <- long |>
   ) |>
   ungroup() |>
   select(-`Geographic Area`, -current_employment)
+
+length(unique(wbccpd$NOC))
 
 #' This is the "by NOC and geographic_area" breakdown of the labour market.
 #' 1. Suppression rule:
@@ -715,8 +609,9 @@ career_profile_regional_excel <- wbccpd_regional %>%
   add_column(`      ` = "", .after = "Thompson Okanagan_jos") %>%
   select(-contains("British Columbia"))
 
+length(unique(career_profile_regional_excel$NOC))
 
-wb <- loadWorkbook(here("new_templates", "WorkBC_Career_Profile_Data.xlsx"))
+wb <- loadWorkbook(here("templates", list.files(here("templates"), pattern = "WorkBC_Career_Profile")))
 writeWorksheet(wb, wbccpd, "Provincial Outlook", 4, 1, header = FALSE)
 writeWorksheet(wb, career_profile_regional_excel, "Regional Outlook", 5, 1, header = FALSE)
 saveWorkbook(wb, here(
@@ -728,54 +623,6 @@ saveWorkbook(wb, here(
   )
 ))
 
-# WorkBC_Career_Trek.xlsx------------------------------
-#' Provide data for all the NOCS because have not provided the filter
-
-wbcct_jo <- jo |>
-  filter(
-    Industry == "All industries",
-    `Geographic Area` == "British Columbia"
-  ) |>
-  ungroup() |>
-  select(NOC = NOC_2021, Description = NOC_2021_Description, jo) |>
-  mutate(jo = round(jo, -1))
-
-wbcct_emp <- emp |>
-  filter(
-    NOC != "#T",
-    Industry == "All industries",
-    `Geographic Area` == "British Columbia"
-  ) |>
-  ungroup() |>
-  select(-Industry, -`Geographic Area`) |>
-  group_by(NOC, Description) |>
-  nest() |>
-  mutate(cagr = map_dbl(data, get_10_cagr)) |>
-  select(-data)
-
-wbcct <- full_join(wbcct_emp, wbcct_jo) |>
-  right_join(career_trek_have_videos) |>
-  select(
-    `NOC 2016`,
-    NOC,
-    `Sr No`,
-    `NOC Title (2016)`,
-    Description,
-    starts_with("Occupation"),
-    cagr,
-    jo
-  )
-
-wb <- loadWorkbook(here("new_templates", "WorkBC_Career_Trek.xlsx"))
-writeWorksheet(wb, wbcct, "LMO", 2, 1, header = FALSE)
-saveWorkbook(wb, here(
-  "out",
-  paste0(
-    "WorkBC_Career_Trek_",
-    fyod,
-    ".xlsx"
-  )
-))
 
 # WorkBC_Industry_Profile.xlsx------------------
 
@@ -785,9 +632,8 @@ wbcip_jo <- jo |>
     `Geographic Area` == "British Columbia",
     Industry != "All industries"
   ) |>
-  mutate(`Industry (sub-industry)` = str_to_lower(str_replace_all(Industry, " ", "_"))) |>
-  full_join(ind_char) |>
-  group_by(`Industry (aggregate)`) |>
+  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
+  group_by(aggregate_industry) |>
   summarize(jo = sum(jo))
 
 wbcip <- emp |>
@@ -796,11 +642,10 @@ wbcip <- emp |>
     `Geographic Area` == "British Columbia",
     Industry != "All industries"
   ) |>
-  mutate(`Industry (sub-industry)` = str_to_lower(str_replace_all(Industry, " ", "_"))) |>
-  full_join(ind_char) |>
-  group_by(`Industry (aggregate)`, name, Variable) |>
+  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
+  group_by(aggregate_industry, name, Variable) |>
   summarize(value = sum(value)) |>
-  group_by(`Industry (aggregate)`, .add = FALSE) |>
+  group_by(aggregate_industry, .add = FALSE) |>
   nest() |>
   mutate(
     levels = map(data, get_levels),
@@ -821,17 +666,17 @@ wbcip <- emp |>
     contains("Industry"),
     jo,
     contains("share"),
-    contains("employment"),
+  #  contains("employment"),
     contains("cagr")
   ) |>
   mutate(
     jo = round(jo, -1),
-    across(contains("share"), ~ round(.x, 3)),
-    across(contains("employment"), ~ round(.x, -1))
+    across(contains("share"), ~ round(.x, 3))
+  #  across(contains("employment"), ~ round(.x, -1))
   )
 
-wb <- loadWorkbook(here("new_templates", "WorkBC_Industry_Profile.xlsx"))
-writeWorksheet(wb, wbcip, "Sheet1", 4, 1, header = FALSE)
+wb <- loadWorkbook(here("templates", list.files(here("templates"), pattern = "WorkBC_Industry_Profile")))
+writeWorksheet(wb, wbcip, "Sheet1", 3, 1, header = FALSE)
 saveWorkbook(wb, here(
   "out",
   paste0(
@@ -863,7 +708,8 @@ wbcrpd_s1 <- long |>
   unnest(cagrs) |>
   select(-data) |>
   mutate(across(c(ffy, sfy, jo, rep, exp, contains("employment"), diff), ~ round(.x, -1))) |>
-  select(`Geographic Area`, ffy, sfy, jo, rep, rep_p, exp, exp_p, everything())
+  select(Region=`Geographic Area`, ffy, sfy, jo, rep, rep_p, exp, exp_p, diff, ty_cagr, ffy_cagr, sfy_cagr)|>
+  mutate(Region=fix_region_names(Region))
 
 wbcrpd_s2 <- long |>
   filter(
@@ -871,45 +717,17 @@ wbcrpd_s2 <- long |>
     `Geographic Area` != "British Columbia"
   ) |>
   mutate(
-    jo = map_dbl(data, get_10_jo),
-    ten_cagr = map_dbl(data, get_10_cagr)
+    jo = map_dbl(data, get_10_jo)
   ) |>
   group_by(`Geographic Area`) |>
   slice_max(order_by = jo, n = 10, with_ties = FALSE) |>
-  select(NOC, Description, jo, ten_cagr, `Geographic Area`) |>
-  mutate(jo = round(jo, -1))
+  select(NOC, Description, jo, Region=`Geographic Area`) |>
+  mutate(jo = round(jo, -1),
+         Region=fix_region_names(Region))
 
-wbcrpd_s3a <- jo |>
-  filter(
-    NOC_2021 == "#T",
-    Industry != "All industries",
-    `Geographic Area` != "British Columbia"
-  ) |>
-  group_by(`Geographic Area`) |>
-  slice_max(order_by = jo, n = 10, with_ties = FALSE) |>
-  select(-contains("NOC")) |>
-  mutate(jo = round(jo, -1))
-
-wbcrpd_s3b <- emp |>
-  filter(
-    NOC == "#T",
-    Industry != "All industries",
-    `Geographic Area` != "British Columbia"
-  ) |>
-  select(-NOC, -Description) |>
-  group_by(`Geographic Area`, Industry) |>
-  nest() |>
-  mutate(ten_cagr = map_dbl(data, get_10_cagr)) |>
-  select(-data)
-
-wbcrpd_s3 <- inner_join(wbcrpd_s3a, wbcrpd_s3b) |>
-  select(Industry, jo, ten_cagr, `Geographic Area`) |>
-  arrange(`Geographic Area`)
-
-wb <- loadWorkbook(here("new_templates", "WorkBC_Regional_Profile_Data.xlsx"))
+wb <- loadWorkbook(here("templates", list.files(here("templates"), pattern = "WorkBC_Regional_Profile")))
 writeWorksheet(wb, wbcrpd_s1, "Regional Profiles - LMO", 5, 1, header = FALSE)
 writeWorksheet(wb, wbcrpd_s2, "Top Occupation", 4, 1, header = FALSE)
-writeWorksheet(wb, wbcrpd_s3, "Top Industries", 4, 1, header = FALSE)
 saveWorkbook(wb, here(
   "out",
   paste0(
@@ -919,71 +737,4 @@ saveWorkbook(wb, here(
   )
 ))
 
-
-#wage data-----------------------------------
-
-desired_nocs <- occ_char|>
-    select(NOC, `Occupation Title`=Description)|>
-    mutate(NOC=str_remove(NOC,"#"))
-
-wage <-  read_excel(here("data","WorkBC_2023_Wage_Data.xlsx"))|>
-  right_join(desired_nocs)|>
-  arrange(NOC)|>
-  mutate(across(starts_with("ESDC")|starts_with("Calculated"), make_na))
-
-write.xlsx(wage, here(
-  "out",
-  paste0(
-    "Wages_where_NOCS_00011:00015_rolled_into_00018_(missing)_",
-    fyod,
-    ".xlsx"
-  )
-))
-
-#' top skills by occupation---------------------------------
-#' The skills data does not match LMO occupations:
-
-raw_skills <-  read_excel(here("data","Top skills by NOC2021 occupations.xlsx")) #this file has missing data
-
-skill_names <- unique(raw_skills$`Skills & Competencies`)
-
-skills <- raw_skills|>
-  right_join(desired_nocs, by=c("NOC2021"="NOC", "NOC2021 Title"="Occupation Title"))|> #the desired NOCs
-  arrange(NOC2021)|>
-  group_by(NOC2021, `NOC2021 Title`)|>
-  nest()|>
-  mutate(data=map(data, fill_skills))|>
-  unnest(data)
-
-
-write.xlsx(skills, here(
-  "out",
-  paste0(
-    "Top skills_where_NOCS_00011:00015_rolled_into_00018_(missing)_",
-    fyod,
-    ".xlsx"
-  )
-))
-
-#Occupational interests---------------------------------
-
-occ_int <- read_excel(here("data","Occupational interest by NOC2021 occupation_plus_5.xlsx"))|>
-  select(NOC=`NOC 2021`, Options, `Occupational Interest`)|>
-  right_join(desired_nocs)|>
-  select(-`Occupation Title`)|>
-  group_by(NOC)|>
-  nest()|>
-  mutate(data=map(data, fill_interests))|>
-  unnest(data)|>
-  arrange(NOC)|>
-  mutate(NOC=paste0("#",NOC))
-
-write.xlsx(occ_int, here(
-  "out",
-  paste0(
-    "Occupational_Interests_",
-    fyod,
-    ".xlsx"
-  )
-))
 
