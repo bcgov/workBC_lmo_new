@@ -6,7 +6,6 @@ fyod <- 2024 # first year of data: need to reset each year
 #' "ftpt2125NOCp2.csv" (run the SAS scripts... will need to be changed 2027ish)
 #'  lmo64_agg_stokes_mapping.csv
 #'  one file that contains "HOO" in its name (Feng)
-#'  one file that contains "Wage_Data" in its name (Nicole)
 #'  one file that contains "Occupational Characteristics in its name (Nicole)
 #' "one file that contains Top skills in its name (ONET)
 #'
@@ -15,6 +14,10 @@ fyod <- 2024 # first year of data: need to reset each year
 # "constants"------------------------
 fyfn <- fyod + 5
 tyfn <- fyod + 10
+# WorkBC wants mixed case names...
+exceptions <- c("And", "For", "Of", "The", "In", "At", "On", "With", "As", "By")
+pattern <- paste0("\\b(", paste(exceptions, collapse = "|"), ")\\b")
+
 # libraries---------------------------
 library(tidyverse)
 library(here)
@@ -201,19 +204,8 @@ occ_char <- read_excel(
        list.files(here("data"),
                   pattern = "Occupational Characteristics")),
   skip = 3,
-  na = "x"
+  na = c("x","-")
 )
-
-#wages-----------------------------------------
-
-wages <- read_excel(here("data", list.files(here("data"),pattern = "Wage_Data")),
-                    skip = 0,
-                    na = "-")|>
-  mutate(NOC=paste0("#", str_pad(NOC, width=5, side="left", pad="0")))|>
-  select(NOC, contains("calculated"))
-
-occ_char <- occ_char|>
-  full_join(wages)
 
 # industry characteristics---------------------------------------------------
 
@@ -313,7 +305,7 @@ cdqjom <- occ_char |>
     jo = contains("Job Openings") & !contains("Ave"),
     TEER,
     `Salary (calculated median salary)` = starts_with("Calculated Median Annual"),#might be the wrong one
-  ) |>
+  )|>
   mutate(
     jo = round(jo, -1),
     Link = paste0(
@@ -351,8 +343,8 @@ temp <- cdqjom %>%
     `Industry (aggregate)`=aggregate_industry
   ) |>
   mutate(`Industry (aggregate)` = if_else(is.na(`Industry (aggregate)`),"All industries", `Industry (aggregate)`),
-         `Industry (aggregate)` = str_to_title(`Industry (aggregate)`),
-         `Industry (sub-industry)` = str_to_title(`Industry (sub-industry)`),
+         `Industry (aggregate)` = str_replace_all(str_to_title(`Industry (aggregate)`), regex(pattern, ignore_case = TRUE), tolower),
+         `Industry (sub-industry)` = str_replace_all(str_to_title(`Industry (sub-industry)`), regex(pattern, ignore_case = TRUE), tolower),
          Region=fix_region_names(Region)
          ) |>
   filter(NOC_2021 != "#T") |>
@@ -367,7 +359,9 @@ write.xlsx(temp, here(
       fyod,
       ".xlsx"
       )
-    )
+    ),
+    keepNA=TRUE,
+    na.string="N/A"
     )
 
 # career_search_tool_occupation_groups_manual_update.xlsx-----------------
@@ -402,17 +396,19 @@ cstogmu_manage <- occ_char |>
   ) |>
   select(-TEER)
 
-cstogmu_all <- occ_char |>
-  select(NOC) |>
-  mutate(`Occupational category` = "All")
+# cstogmu_all <- occ_char |>
+#   select(NOC) |>
+#   mutate(`Occupational category` = "All")
 
 no_regions <- bind_rows(
-  cstogmu_all,
+#  cstogmu_all,
   cstogmu_manage,
   cstogmu_care,
   cstogmu_trades,
   cstogmu_stem
-)
+)|>
+  mutate(`Occupational category`=str_to_sentence(`Occupational category`),
+         `Occupational category`=str_replace_all(`Occupational category`,"Stem","STEM"))
 
 crossing(no_regions, Region=all_regions)|>
   bind_rows(cstogmu_hoo)|>
@@ -424,7 +420,10 @@ crossing(no_regions, Region=all_regions)|>
       fyod,
       ".xlsx"
     )
-  ))
+  ),
+  keepNA=TRUE,
+  na.string="N/A"
+  )
 
 # HOO BC and Region for new tool.xlsx-----------------------------
 
@@ -462,7 +461,10 @@ occ_char |>
       fyod,
       ".xlsx"
     )
-  ))
+  ),
+  keepNA=TRUE,
+  na.string="N/A"
+  )
 
 # Job Openings by Industry_LMO.xlsx------------------------
 
@@ -498,6 +500,7 @@ career_profiles <- jo |>
   rename("Job Openings {fyod}-{tyfn}" := jo)
 
 wb <- loadWorkbook(here("templates", list.files(here("templates"), pattern = "Job_Openings_by_Industry")))
+setMissingValue(wb, value = "N/A")
 writeWorksheet(wb, career_profiles, "Career Profiles", 5, 1, header = FALSE)
 writeWorksheet(wb, `Job Openings by industry`, "Job Openings by industry", 3, 1, header = FALSE)
 saveWorkbook(wb, here(
@@ -543,7 +546,10 @@ jo |>
       fyod,
       ".xlsx"
     )
-  ))
+  ),
+  keepNA=TRUE,
+  na.string="N/A"
+  )
 
 # WorkBC_Career_Profile_Data.xlsx----------------------------------------------------
 #' 1. Suppression rule:
@@ -612,6 +618,7 @@ career_profile_regional_excel <- wbccpd_regional %>%
 length(unique(career_profile_regional_excel$NOC))
 
 wb <- loadWorkbook(here("templates", list.files(here("templates"), pattern = "WorkBC_Career_Profile")))
+setMissingValue(wb, value = "N/A")
 writeWorksheet(wb, wbccpd, "Provincial Outlook", 4, 1, header = FALSE)
 writeWorksheet(wb, career_profile_regional_excel, "Regional Outlook", 5, 1, header = FALSE)
 saveWorkbook(wb, here(
@@ -676,6 +683,7 @@ wbcip <- emp |>
   )
 
 wb <- loadWorkbook(here("templates", list.files(here("templates"), pattern = "WorkBC_Industry_Profile")))
+setMissingValue(wb, value = "N/A")
 writeWorksheet(wb, wbcip, "Sheet1", 3, 1, header = FALSE)
 saveWorkbook(wb, here(
   "out",
@@ -726,6 +734,7 @@ wbcrpd_s2 <- long |>
          Region=fix_region_names(Region))
 
 wb <- loadWorkbook(here("templates", list.files(here("templates"), pattern = "WorkBC_Regional_Profile")))
+setMissingValue(wb, value = "N/A")
 writeWorksheet(wb, wbcrpd_s1, "Regional Profiles - LMO", 5, 1, header = FALSE)
 writeWorksheet(wb, wbcrpd_s2, "Top Occupation", 4, 1, header = FALSE)
 saveWorkbook(wb, here(
