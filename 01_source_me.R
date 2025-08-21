@@ -1,13 +1,14 @@
 #' This script produces the LMO files for WorkBC. Requires inputs:
-fyod <- 2024 # first year of data: need to reset each year
+fyod <- 2025 # first year of data: need to reset each year
 #' "employment.csv" (4castviewer: all nocs, all industries, all regions)
 #' "job_openings.csv"  (4castviewer: all nocs, all industries, all regions)
 #' "ftpt2125NOCp1.csv" (run the SAS scripts... will need to be changed 2027ish)
 #' "ftpt2125NOCp2.csv" (run the SAS scripts... will need to be changed 2027ish)
-#'  lmo64_agg_stokes_mapping.csv
+#'  industry_mapping_****.xlsx
 #'  one file that contains "HOO" in its name (Feng)
-#'  one file that contains "Occupational Characteristics in its name (Nicole)
-#' "one file that contains Top skills in its name (ONET)
+#'  one file that contains "Occupational Characteristics" in its name (Nicole)
+#'  one file that contains "Wage" in its name (Nicole)
+#' "one file that contains "onet_skills" in its name (ONET)
 #'
 #' To Run: source me, and then you will have to verify the hoo geography is right...
 
@@ -24,6 +25,7 @@ library(here)
 library(vroom)
 library(readxl)
 library(rvest)
+library(janitor)
 library(openxlsx)
 library(XLConnect)
 # deal with naming conflicts between packages
@@ -93,7 +95,7 @@ get_jos <- function(tbbl) {
   #' the sum of job openings for the first five year and second five year period
   ffy <- sum(tbbl$value[tbbl$Variable == "Job Openings" & tbbl$name %in% (fyod + 1):fyfn])
   sfy <- sum(tbbl$value[tbbl$Variable == "Job Openings" & tbbl$name %in% (fyfn + 1):tyfn])
-  tibble(ffy = ffy, sfy = sfy)
+  tibble(jo_ffy = ffy, jo_sfy = sfy)
 }
 get_breakdown <- function(tbbl) {
   #' Takes a tbbl with columns name, value, Variable, and returns a tbbl containing
@@ -113,7 +115,7 @@ get_breakdown <- function(tbbl) {
     rep_p < 0 ~ 0,
     TRUE ~ rep_p
   )
-  tibble(jo = jo, rep_p = 100 * rep_p, rep = rep, exp_p = 100 * exp_p, exp = exp)
+  tibble(jo_ty = jo, rep_p = 100 * rep_p, rep = rep, exp_p = 100 * exp_p, exp = exp)
 }
 get_current <- function(tbbl) {
   #' Takes a tbbl with columns name, value, Variable, and returns the
@@ -145,7 +147,46 @@ fix_region_names <- function(region){
 
 #Read in the data------------------------------
 
-skills_df <- read_excel(here("data",list.files(here("data"), pattern = "Top skills")))|>
+#top skills by NOC--------------------------------
+
+skills <- read_excel(here("data","onet_skills.xlsx"))|>
+  clean_names()|>
+  select(onet=contains("o_net"), element_name, scale_name, data_value)|>
+  pivot_wider(names_from = scale_name, values_from = data_value)|>
+  mutate(Importance=(Importance-min(Importance))/(max(Importance)-min(Importance))*100, #0-100 scale
+         Level=(Level-min(Level))/(max(Level)-min(Level))*100 #0-100 scale
+  )
+
+skill_mapping <- read_excel(here("data","onet2019_soc2018_noc2016_noc2021_crosswalk_corrected.xlsx"))|>
+  clean_names() |>
+  select(contains("2021"), onet=contains("2019"))
+
+mapped_skills <- inner_join(skill_mapping, skills)|>
+  group_by(noc2021, noc2021_title, element_name)|>
+  summarize(Importance=round(mean(Importance, na.rm = TRUE),1),
+            Level=round(mean(Level, na.rm = TRUE), 1))|>
+  mutate(importance_description=case_when(
+    Importance == 0 ~ "Not required",
+    Importance < 40 ~ "Less important",
+    Importance < 60 ~ "Important",
+    Importance < 80 ~ "Very Important",
+    TRUE ~ "Extremely Important"),
+    level_description=case_when(
+      Level == 0 ~ "Not required",
+      Level < 33 ~ "Basic proficiency",
+      Level < 66 ~ "Medium proficiency",
+      TRUE ~ "High proficiency")
+  )|>
+  select(NOC2021 = noc2021, `NOC2021 Title` = noc2021_title,
+         `Skills & Competencies` = element_name, `Importance Score`=Importance,
+         `Importance Description`=importance_description, `Level Score`=Level,
+         `Level Description`=level_description)
+
+length(unique(mapped_skills$NOC2021)) #missing skills data for some NOCs
+
+openxlsx::write.xlsx(mapped_skills, here("out", paste0("skills_data_for_career_profiles_",today(),".xlsx")))
+
+skills_df <- mapped_skills |>
   group_by(NOC=NOC2021)|>
   mutate(NOC=paste0("#",NOC))|>
   slice_max(`Importance Score`, n=3, with_ties = FALSE)|>
@@ -186,7 +227,9 @@ ftpt <- vroom(
   select(NOC_2021 = NOC_5, `Part-time/full-time`) |>
   mutate(NOC_2021 = paste0("#", NOC_2021))
 senior_managers <- tibble(NOC_2021 = "#00018", `Part-time/full-time` = "Higher Chance of Full-Time") # based on components
-ftpt <- bind_rows(ftpt, senior_managers)
+
+ftpt <- bind_rows(ftpt, senior_managers)|>
+  filter(!NOC_2021 %in% c("#00011", "#00012", "#00013", "#00014", "#00015"))
 
 teer_description <- tibble(
   TEER_description = c("Management",
@@ -198,26 +241,27 @@ teer_description <- tibble(
   TEER=as.character(0:5)
   )
 
+# wages-----------------------------------
+
+wages <- read_excel(here("data", list.files(here("data"), pattern = "Wage")), na = "N/A")|>
+  select(NOC, median_salary=contains("salary"))|>
+  mutate(NOC=paste0("#",str_pad(NOC, width=5, pad=0)))
+
+
 # occupation characteristics--------------------------------------
 occ_char <- read_excel(
   here("data",
        list.files(here("data"),
                   pattern = "Occupational Characteristics")),
   skip = 3,
-  na = c("x","-")
-)
+  na = c("x","-", "N/A", "n/a"))|>
+  full_join(wages)
 
 # industry characteristics---------------------------------------------------
 
-ind_char <- read_csv(here(
-  "data",
-  list.files(here("data"),
-    pattern = "lmo64"
-  )
-))|>
-  select(-lmo_ind_code, -stokes_industry)|>
+ind_char <- read_excel(here("data",list.files(here("data"),pattern = "industry_mapping")))|>
+  select(contains("detailed"), contains("aggregate"))|>
   distinct()
-
 
 # job openings----------------------------------------------
 jo <- vroom(here("data", "job_openings.csv"), skip = 3) |>
@@ -261,7 +305,9 @@ long <- bind_rows(jore, emp_to_add_to_jore) |>
 
 # high opportunity occupations------------------------------------
 
-hoo_sheets <- head(excel_sheets(here("data", list.files(here("data"), pattern = "HOO"))), -1) |>
+short_hoo <- occ_char|>
+  select(contains("HOO"))|>
+  colnames()|>
   sort()
 
 jo_regions <- jo$`Geographic Area`|>
@@ -270,22 +316,20 @@ jo_regions <- jo$`Geographic Area`|>
   sort()
 
 hoo_geography <- tibble(
-  name = hoo_sheets,
+  value = short_hoo,
   Geography = jo_regions
 )
-View(hoo_geography)
+#View(hoo_geography)
 # continue <- readline("Does the hoo geography shown in the tab above match ? (answer y or n)")
 # assertthat::assert_that(continue == "y", msg = "You need to manually need to fix hoo_geography")
-hoo <- map(set_names(hoo_sheets),
-  read_excel,
-  path = here("data", list.files(here("data"), pattern = "HOO")),
-  range = "A5:C500" # can't possibly be more than 500 hoos?
-) |>
-  enframe() |>
-  full_join(hoo_geography) |>
-  select(-name) |>
-  unnest(value) |>
-  na.omit()
+
+hoo <- occ_char|>
+  select(NOC, contains("HOO"))|>
+  pivot_longer(cols=-NOC)|>
+  select(-name)|>
+  filter(!str_detect(value, "Non"))|>
+  full_join(hoo_geography)|>
+  select(-value)
 
 # employment----------------------------------
 
@@ -302,26 +346,20 @@ cdqjom <- occ_char |>
   select(
     NOC_2021 = NOC,
     NOC_2021_Description = Description,
-    jo = contains("Job Openings") & !contains("Ave"),
+    jo = contains("LMO Job Openings"),
     TEER,
-    `Salary (calculated median salary)` = starts_with("Calculated Median Annual"),#might be the wrong one
-  )|>
-  mutate(
-    jo = round(jo, -1),
-    Link = paste0(
+    median_salary)|>
+  mutate(jo = round(jo, -1),
+         Link = paste0(
       "https://www.workbc.ca/Jobs-Careers/Explore-Careers/Browse-Career-Profile/",
-      str_sub(NOC_2021, 2)
-    ),
-    JobBank2 = paste0(
+      str_sub(NOC_2021, 2)),
+      JobBank2 = paste0(
       "https://www.workbc.ca/jobs-careers/find-jobs/jobs.aspx?searchNOC=",
-      str_sub(NOC_2021, 2)
-    ),
-    TEER = as.character(TEER)
-  ) |>
+      str_sub(NOC_2021, 2)),
+      TEER = as.character(TEER))|>
   inner_join(teer_description) |>
   relocate(TEER_description, .after = TEER) |>
   rename("Job Openings {fyod}-{tyfn}" := jo)
-
 
 # Career_Search_Tool_Job_Openings----------------------------
 
@@ -329,7 +367,7 @@ temp <- cdqjom %>%
   select(-contains("Job Openings")) |>
   inner_join(jo)|>
   mutate(jo = round(jo, -1))|>
-  fuzzyjoin::stringdist_full_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
+  fuzzyjoin::stringdist_full_join(ind_char, by=c("Industry"="lmo_detailed_industry"))|>
   select(NOC_2021,
     NOC_2021_Description,
     `Industry (sub-industry)` = Industry,
@@ -337,7 +375,7 @@ temp <- cdqjom %>%
     "Job Openings {fyod}-{tyfn}" := jo,
     TEER,
     TEER_description,
-    `Salary (calculated median salary)`,
+    `Salary (calculated median salary)`=median_salary,
     Link,
     JobBank2,
     `Industry (aggregate)`=aggregate_industry
@@ -369,7 +407,7 @@ write.xlsx(temp, here(
 all_regions <- fix_region_names(unique(hoo$Geography)) #to create the redundant information WorkBC wants...
 
 cstogmu_hoo <- hoo |>
-  select(NOC = "#NOC (2021)", Region=Geography) |>
+  select(NOC, Region=Geography) |>
   mutate(`Occupational category` = "High opportunity occupations",
          Region=fix_region_names(Region))
 
@@ -396,12 +434,8 @@ cstogmu_manage <- occ_char |>
   ) |>
   select(-TEER)
 
-# cstogmu_all <- occ_char |>
-#   select(NOC) |>
-#   mutate(`Occupational category` = "All")
 
 no_regions <- bind_rows(
-#  cstogmu_all,
   cstogmu_manage,
   cstogmu_care,
   cstogmu_trades,
@@ -429,9 +463,8 @@ crossing(no_regions, Region=all_regions)|>
 
 occ_char |>
   left_join(skills_df)|>
-  select(-contains("Job Openings")) |>
-  right_join(hoo, by = c("NOC" = "#NOC (2021)")) |>
-  rename(jo = contains("Job Openings") & !contains("Ave")) |>
+  right_join(hoo)|>
+  rename(jo = contains("Job Openings"))|>
   mutate(jo = round(jo, -1))|>
   unite(Interests, `Occupational Interest (Primary)`,
   `Occupational Interest (Secondary)`,
@@ -442,7 +475,7 @@ occ_char |>
     "Wage Rate Low {fyod}" := contains("Wage Rate Low"),
     "Wage Rate Median {fyod}" := contains("Wage Rate Median"),
     "Wage Rate High {fyod}" := contains("Wage Rate High"),
-    `Median Annual Salary` = starts_with("Calculated Median Annual"),
+    `Median Annual Salary` = median_salary,
     Interests,
     `Skills and Competencies (Top 3 together)`=`Skills: Top 3`,
     First=Skill1,
@@ -470,7 +503,7 @@ occ_char |>
 
 career_profiles <- jo |>
   filter(`Geographic Area` == "British Columbia") |>
-  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
+  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_detailed_industry"))|>
   group_by(NOC_2021, NOC_2021_Description, aggregate_industry) |>
   summarize(job_openings = sum(jo)) |>
   slice_max(job_openings, n = 5, with_ties = FALSE) |>
@@ -493,7 +526,7 @@ career_profiles <- jo |>
     `Geographic Area` == "British Columbia",
     NOC_2021 == "#T"
   ) |>
-  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
+  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_detailed_industry"))|>
   na.omit() |>
   group_by(aggregate_industry) |>
   summarize(jo = round(sum(jo), -1)) |>
@@ -530,7 +563,7 @@ jo |>
     NOC_2021 != "#T",
     `Geographic Area` == "British Columbia"
   ) |>
-  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
+  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_detailed_industry"))|>
   group_by(NOC_2021, NOC_2021_Description, aggregate_industry)|>
   summarize(jo = sum(jo)) |>
   group_by(aggregate_industry, .add = FALSE) |>
@@ -572,9 +605,9 @@ wbccpd <- long |>
   select(-data) |>
   unnest(cagr) |>
   unnest(jos) |>
-  unnest(breakdown) |>
+  unnest(breakdown)|>
   mutate(
-    across(c(ffy, sfy, jo, rep, exp), ~ round(.x, -1)),
+    across(c(jo_ffy, jo_sfy, jo_ty, rep, exp), ~ round(.x, -1)),
     across(where(is.numeric), ~ if_else(current_employment < 20, NA_real_, .x))
   ) |>
   ungroup() |>
@@ -585,19 +618,30 @@ length(unique(wbccpd$NOC))
 #' This is the "by NOC and geographic_area" breakdown of the labour market.
 #' 1. Suppression rule:
 #'   If the current year's employment is below 20, then all numeric variables should be changed to "N/A"
-wbccpd_regional <- long |>
+wbccpd_regional_long <- long |>
   filter(NOC != "#T") |>
   mutate(
     current_employment = map_dbl(data, get_current),
-    ten_cagr = map_dbl(data, get_10_cagr),
-    jos = map_dbl(data, get_10_jo)
+    ty_cagr = map_dbl(data, get_10_cagr),
+    jo_ty = map_dbl(data, get_10_jo)
   ) |>
   select(-data) |>
   mutate(
-    across(contains("current_employment") | contains("jos"), ~ round(.x, -1)),
+    across(contains("current_employment") | contains("jo_ty"), ~ round(.x, -1)),
     across(where(is.numeric), ~ if_else(current_employment < 20, NA_real_, .x))
   ) |>
-  arrange(`Geographic Area`) |>
+  arrange(`Geographic Area`)
+
+#try to convince them tidy data is better...
+
+openxlsx::write.xlsx(wbccpd_regional_long,
+                     here("out", paste0("career_profile_regional_long_",today(),".xlsx")),
+                     na.string="N/A",
+                     keepNA=TRUE)
+
+#they are unlikely to agree...
+
+wbccpd_regional <- wbccpd_regional_long|>
   pivot_wider(
     names_from = `Geographic Area`,
     values_from = -all_of(c("NOC", "Description", "Geographic Area")),
@@ -607,12 +651,12 @@ wbccpd_regional <- long |>
   select(!contains("British Columbia"), everything())
 
 career_profile_regional_excel <- wbccpd_regional %>%
-  add_column(` ` = "", .after = "Cariboo_jos") %>%
-  add_column(`  ` = "", .after = "Kootenay_jos") %>%
-  add_column(`   ` = "", .after = "Mainland South West_jos") %>%
-  add_column(`    ` = "", .after = "North Coast & Nechako_jos") %>%
-  add_column(`     ` = "", .after = "North East_jos") %>%
-  add_column(`      ` = "", .after = "Thompson Okanagan_jos") %>%
+  add_column(` ` = "", .after = "Cariboo_jo_ty") %>%
+  add_column(`  ` = "", .after = "Kootenay_jo_ty") %>%
+  add_column(`   ` = "", .after = "Mainland South West_jo_ty") %>%
+  add_column(`    ` = "", .after = "North Coast & Nechako_jo_ty") %>%
+  add_column(`     ` = "", .after = "North East_jo_ty") %>%
+  add_column(`      ` = "", .after = "Thompson Okanagan_jo_ty") %>%
   select(-contains("British Columbia"))
 
 length(unique(career_profile_regional_excel$NOC))
@@ -630,7 +674,6 @@ saveWorkbook(wb, here(
   )
 ))
 
-
 # WorkBC_Industry_Profile.xlsx------------------
 
 wbcip_jo <- jo |>
@@ -639,9 +682,10 @@ wbcip_jo <- jo |>
     `Geographic Area` == "British Columbia",
     Industry != "All industries"
   ) |>
-  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
+  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_detailed_industry"))|>
   group_by(aggregate_industry) |>
-  summarize(jo = sum(jo))
+  summarize(jo = sum(jo))|>
+  rename(jo_ty=jo)
 
 wbcip <- emp |>
   filter(
@@ -649,7 +693,7 @@ wbcip <- emp |>
     `Geographic Area` == "British Columbia",
     Industry != "All industries"
   ) |>
-  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_industry_name"))|>
+  fuzzyjoin::stringdist_join(ind_char, by=c("Industry"="lmo_detailed_industry"))|>
   group_by(aggregate_industry, name, Variable) |>
   summarize(value = sum(value)) |>
   group_by(aggregate_industry, .add = FALSE) |>
@@ -668,18 +712,17 @@ wbcip <- emp |>
     five_share = round(100 * employment_five / sum(employment_five), 1),
     ten_share = round(100 * employment_ten / sum(employment_ten), 1)
   ) |>
-  full_join(wbcip_jo) |>
+  full_join(wbcip_jo)|>
+  mutate(
+    jo_ty = round(jo_ty, -1),
+    across(contains("share"), ~ round(.x, 3))
+    #  across(contains("employment"), ~ round(.x, -1))
+  )|>
   select(
     contains("Industry"),
-    jo,
+    jo_ty,
     contains("share"),
-  #  contains("employment"),
     contains("cagr")
-  ) |>
-  mutate(
-    jo = round(jo, -1),
-    across(contains("share"), ~ round(.x, 3))
-  #  across(contains("employment"), ~ round(.x, -1))
   )
 
 wb <- loadWorkbook(here("templates", list.files(here("templates"), pattern = "WorkBC_Industry_Profile")))
@@ -715,8 +758,8 @@ wbcrpd_s1 <- long |>
   ) |>
   unnest(cagrs) |>
   select(-data) |>
-  mutate(across(c(ffy, sfy, jo, rep, exp, contains("employment"), diff), ~ round(.x, -1))) |>
-  select(Region=`Geographic Area`, ffy, sfy, jo, rep, rep_p, exp, exp_p, diff, ty_cagr, ffy_cagr, sfy_cagr)|>
+  mutate(across(c(jo_ffy, jo_sfy, jo_ty, rep, exp, contains("employment"), diff), ~ round(.x, -1))) |>
+  select(Region=`Geographic Area`, jo_ffy, jo_sfy, jo_ty, rep, rep_p, exp, exp_p, diff, ty_cagr, ffy_cagr, sfy_cagr)|>
   mutate(Region=fix_region_names(Region))
 
 wbcrpd_s2 <- long |>
@@ -731,7 +774,8 @@ wbcrpd_s2 <- long |>
   slice_max(order_by = jo, n = 10, with_ties = FALSE) |>
   select(NOC, Description, jo, Region=`Geographic Area`) |>
   mutate(jo = round(jo, -1),
-         Region=fix_region_names(Region))
+         Region=fix_region_names(Region))|>
+  rename(jo_ty=jo)
 
 wb <- loadWorkbook(here("templates", list.files(here("templates"), pattern = "WorkBC_Regional_Profile")))
 setMissingValue(wb, value = "N/A")
@@ -745,5 +789,11 @@ saveWorkbook(wb, here(
     ".xlsx"
   )
 ))
+
+
+
+
+
+
 
 
