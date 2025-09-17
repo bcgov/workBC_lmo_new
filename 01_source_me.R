@@ -8,7 +8,7 @@ fyod <- 2025 # first year of data: need to reset each year
 #'  one file that contains "HOO" in its name (Feng)
 #'  one file that contains "Occupational Characteristics" in its name (Nicole)
 #'  one file that contains "Wage" in its name (Nicole)
-#' "one file that contains "onet_skills" in its name (ONET)
+#' "Onet data for skills, knowledge, abilites, work activities (ONET)
 #'
 #' To Run: source me, and then you will have to verify the hoo geography is right...
 
@@ -167,7 +167,7 @@ get_nn <- function(q, tbbl){
 
 #top skills by NOC--------------------------------
 
-skills <- read_excel(here("data","onet_skills.xlsx"))|>
+skills <- read_excel(here("data","skills.xlsx"))|>
   clean_names()|>
   select(onet=contains("o_net"), element_name, scale_name, data_value)|>
   pivot_wider(names_from = scale_name, values_from = data_value)|>
@@ -817,10 +817,10 @@ mapping <- read_excel(here("data", "onet2019_soc2018_noc2016_noc2021_crosswalk_c
   distinct()
 
 #the onet data-----------------------------------
-tbbl <- tibble(file=c("onet_skills.xlsx",
-                      "Abilities.xlsx",
-                      "Knowledge.xlsx",
-                      "Work Activities.xlsx"))%>%
+tbbl <- tibble(file=c("skills.xlsx",
+                      "abilities.xlsx",
+                      "knowledge.xlsx",
+                      "work_activities.xlsx"))%>%
   mutate(data=map(file, read_data))%>%
   select(-file)%>%
   unnest(data)%>%
