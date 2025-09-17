@@ -145,6 +145,24 @@ fix_region_names <- function(region){
     str_replace_all("North East", "Northeast")
 }
 
+read_data <- function(file_name){
+  read_excel(here("data", file_name))%>%
+    clean_names()%>%
+    select(o_net_soc_code, element_name, scale_name, data_value)%>%
+    pivot_wider(names_from = scale_name, values_from = data_value)%>%
+    mutate(score=sqrt(Importance*Level), #geometric mean of importance and level
+           #mutate(score=Level,
+           category=(str_split(file_name,"\\.")[[1]][1]))%>%
+    unite(element_name, category, element_name, sep=": ")%>%
+    select(-Importance, -Level)
+}
+
+get_nn <- function(q, tbbl){
+  nn <- dbscan::kNN(tbbl, k = 21, sort=TRUE,  query = q)
+  tibble(nearest_neighbours = rownames(tbbl)[as.vector(nn[["id"]])],
+         distance = as.vector(nn[["dist"]]))
+}
+
 #Read in the data------------------------------
 
 #top skills by NOC--------------------------------
@@ -789,6 +807,92 @@ saveWorkbook(wb, here(
     ".xlsx"
   )
 ))
+
+#Career Transition Tool_Opportunities-------------------------
+
+mapping <- read_excel(here("data", "onet2019_soc2018_noc2016_noc2021_crosswalk_corrected.xlsx"))%>%
+  mutate(noc2021=str_pad(noc2021, "left", pad="0", width=5))%>%
+  unite(noc, noc2021, noc2021_title, sep=": ")%>%
+  select(noc, o_net_soc_code = onetsoc2019)%>%
+  distinct()
+
+#the onet data-----------------------------------
+tbbl <- tibble(file=c("onet_skills.xlsx",
+                      "Abilities.xlsx",
+                      "Knowledge.xlsx",
+                      "Work Activities.xlsx"))%>%
+  mutate(data=map(file, read_data))%>%
+  select(-file)%>%
+  unnest(data)%>%
+  pivot_wider(id_cols = o_net_soc_code, names_from = element_name, values_from = score)%>%
+  inner_join(mapping)%>%
+  ungroup()%>%
+  select(-o_net_soc_code)%>%
+  select(noc, everything())%>%
+  group_by(noc)%>%
+  summarise(across(where(is.numeric), \(x) mean(x, na.rm = TRUE)))%>% #mapping from SOC to NOC is not one to one: mean give one value per NOC
+  mutate(across(where(is.numeric), ~ if_else(is.na(.), mean(., na.rm=TRUE), .))) #for 11 occupations and 4 variables replace missing values with the mean
+
+unrestricted_char <- tbbl%>%
+  column_to_rownames(var="noc")%>%
+  scale()
+
+pca <- prcomp(unrestricted_char)
+
+first_pca <-pca[["x"]][,1:5]%>% #keep only the first 5 principal components.
+  as.data.frame()
+
+unrestricted <- data.frame(first_pca)%>%
+  mutate(data=list(first_pca))%>%
+  rownames_to_column(var="noc")%>%
+  nest(query = starts_with("PC"))%>%
+  mutate(ten_nearest=map2(query, data, get_nn))%>%
+  select(-data,-query)%>%
+  unnest(ten_nearest)%>%
+  filter(noc!=nearest_neighbours)%>%
+  arrange(noc)%>%
+  mutate(`Current Occupation TEER`=str_sub(noc,2,2), .after="noc")%>%
+  mutate(`Career Option TEER`=str_sub(nearest_neighbours,2,2), .after="nearest_neighbours")
+
+for_workBC <- unrestricted|>
+  mutate(`Current Occupation`=str_replace_all(noc,": "," - "))|>
+  separate(noc, into = c("Current Occupation (NOC)", "Current Occupation Title"), sep=": ")|>
+  separate(nearest_neighbours, into = c("Career Option (NOC)", "Career Option Title"), sep=": ")|>
+  mutate(similarity=if_else(distance>median(distance), "medium", "high"))|>
+  select(`Current Occupation (NOC)`,
+         `Current Occupation Title`,
+         `Current Occupation`,
+         `Current Occupation TEER`,
+         `Career Option (NOC)`,
+         `Career Option Title`,
+         `Career Option TEER`,
+         distance,
+         similarity)
+
+teer_description <- read_csv(here("data","teer_description_short.csv"))|>
+  mutate(teer=as.character(teer))
+
+for_workBC_w_teer_description <- for_workBC|>
+  full_join(teer_description, by=c("Current Occupation TEER"="teer"))|>
+  select(-`Current Occupation TEER`)|>
+  rename(`Current Occupation TEER`=data)|>
+  full_join(teer_description, by=c("Career Option TEER"="teer"))|>
+  select(-`Career Option TEER`)|>
+  rename(`Career Option TEER`=data)|>
+  select(`Current Occupation (NOC)`,
+         `Current Occupation Title`,
+         `Current Occupation`,
+         `Current Occupation TEER`,
+         `Career Option (NOC)`,
+         `Career Option Title`,
+         `Career Option TEER`,
+         distance,
+         similarity)
+
+openxlsx::write.xlsx(for_workBC_w_teer_description,
+                     here("out",
+                          paste0("career_transition_tool_opportunities_",year(today()),".xlsx")))
+
 
 
 
