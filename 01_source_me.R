@@ -5,7 +5,6 @@ fyod <- 2025 # first year of data: need to reset each year
 #' "ftpt2125NOCp1.csv" (run the SAS scripts... will need to be changed 2027ish)
 #' "ftpt2125NOCp2.csv" (run the SAS scripts... will need to be changed 2027ish)
 #'  industry_mapping_****.xlsx
-#'  one file that contains "HOO" in its name (Feng)
 #'  one file that contains "Occupational Characteristics" in its name (Nicole)
 #'  one file that contains "Wage" in its name (Nicole)
 #' "Onet data for skills, knowledge, abilites, work activities (ONET)
@@ -479,14 +478,26 @@ crossing(no_regions, Region=all_regions)|>
 
 # HOO BC and Region for new tool.xlsx-----------------------------
 
-occ_char |>
+hoo_no_jo <- occ_char |>
   left_join(skills_df)|>
   right_join(hoo)|>
-  rename(jo = contains("Job Openings"))|>
-  mutate(jo = round(jo, -1))|>
   unite(Interests, `Occupational Interest (Primary)`,
   `Occupational Interest (Secondary)`,
-  `Occupational Interest (Tertiary)`, sep = ", ", na.rm = TRUE)|>
+  `Occupational Interest (Tertiary)`, sep = ", ", na.rm = TRUE)
+
+#job openings by occupation and region
+
+jo_by_noc_region <- jo|>
+  filter(Industry=="All industries")|>
+  ungroup()|>
+  select(-Industry,-NOC_2021_Description)|>
+  rename(NOC=NOC_2021, Geography=`Geographic Area`)|>
+  mutate(Geography=fix_region_names(Geography),
+         jo=round(jo, -1))
+
+#merge organize, write
+
+left_join(hoo_no_jo, jo_by_noc_region)|>
   select(
     `Occupation Title` = Description,
     "Job Openings {fyod}-{tyfn}" := jo,
@@ -505,10 +516,10 @@ occ_char |>
   mutate(NOC = str_sub(`#NOC`, 2, -1), .before = `#NOC`) |>
   mutate(TEER = str_sub(NOC, 2, 2), .before = Geography) |>
   mutate(Geography=fix_region_names(Geography))|>
-  write.xlsx(here(
+write.xlsx(here(
     "out",
     paste0(
-      "HOO_BC_and_Region_for_new_tool_",
+      "HOO_BC_and_Region_for_new_tool_(corrected)",
       fyod,
       ".xlsx"
     )
