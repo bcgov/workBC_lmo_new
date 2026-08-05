@@ -473,20 +473,20 @@ cstogmu_hoo <- occ_char|>
 
 cstogmu_stem <- occ_char |>
   filter(`Occ Group: STEM` == "STEM") |>
-  select(NOC) |>
+  select(NOC, Description) |>
   mutate(`Occupational category` = "STEM")
 
 cstogmu_trades <- occ_char |>
   filter(`Occ Group: Trades` == "Trades") |>
-  select(NOC,`Occupational category` = `Occ Group: Construction Trades`)
+  select(NOC, Description, `Occupational category` = `Occ Group: Construction Trades`)
 
 cstogmu_care <- occ_char |>
   filter(`Occ Group: Deloitte Care Economy` == "Care Economy") |>
-  select(NOC) |>
+  select(NOC, Description) |>
   mutate(`Occupational category` = "Care Economy")
 
 cstogmu_manage <- occ_char |>
-  select(NOC, TEER) |>
+  select(NOC, Description, TEER) |>
   mutate(`Occupational category` = if_else(TEER == 0,
       "Management occupations",
       "Non-management occupations"
@@ -538,7 +538,7 @@ jo_by_noc_region <- jo|>
 
 #merge organize, write
 
-left_join(hoo_no_jo, jo_by_noc_region)|>
+left_join(hoo_no_jo, jo_by_noc_region, by = c("NOC"="NOC","Region"="Geography"))|>
   select(
     `Occupation Title` = Description,
     "Job Openings {fyod}-{tyfn}" := jo,
@@ -552,7 +552,7 @@ left_join(hoo_no_jo, jo_by_noc_region)|>
     Second=Skill2,
     Third=Skill3,
     `#NOC` = NOC,
-    Geography
+    Geography=Region
   ) |>
   mutate(NOC = str_sub(`#NOC`, 2, -1), .before = `#NOC`) |>
   mutate(TEER = str_sub(NOC, 2, 2), .before = Geography) |>
@@ -939,13 +939,14 @@ openxlsx::write.xlsx(for_workBC_w_teer_description,
                      here("out",
                           paste0("career_transition_tool_opportunities_",today(),".xlsx")))
 
+# Not part of the workbc files
 
-occ_char|>
-  left_join(skills_df)|>
-  left_join(mapped_interests, by=c("NOC"="noc_2021"))|>
-  openxlsx::write.xlsx(here("out", paste0("occupational_characteristics_",today(),".xlsx")))
-
-
+# occ_char|>
+#   left_join(skills_df)|>
+#   left_join(mapped_interests, by=c("NOC"="noc_2021"))|>
+#   openxlsx::write.xlsx(here("out", paste0("occupational_characteristics_",today(),".xlsx")))
+#
+#
 
 
 
